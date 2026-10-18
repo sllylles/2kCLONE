@@ -1,5 +1,5 @@
 // Basketball match simulation: 5v5 full court, user controls one player (MyCareer style).
-import { DRIBBLE_STYLES, JUMPSHOTS, clamp } from './data.js';
+import { DRIBBLE_STYLES, JUMPSHOTS, clamp, reachOf } from './data.js';
 
 export const HOOP_X = 41.75;
 export const RIM_Y = 10;
@@ -21,8 +21,10 @@ function angLerp(a, b, t) {
 function gauss() { return (Math.random() + Math.random() + Math.random() - 1.5) / 0.75; }
 
 // Offensive spots in (u = feet from baseline, v = lateral) coordinates.
-const BASE_SPOTS = [[30, 0], [22, 19], [4, -22.5], [17, -12], [7, 6]];
-const SPOT_POOL = [[30, 0], [27, 12], [27, -12], [22, 19], [22, -19], [4, 22.5], [4, -22.5], [16, 0], [7, 6], [7, -6], [17, 12], [17, -12], [11, 13], [11, -13]];
+// The lane is u < 19, |v| < 8: only the dunker spots and cuts live near it, everything else is spaced out.
+const BASE_SPOTS = [[30, 0], [22, 19], [4, -22.5], [17, -13], [5, 11]];
+const SPOT_POOL = [[30, 0], [27, 12], [27, -12], [22, 19], [22, -19], [4, 22.5], [4, -22.5], [21, 0], [5, 11], [5, -11], [17, 13], [17, -13], [11, 15], [11, -15]];
+const inLane = (u, v) => u < 19.5 && Math.abs(v) < 8.5;
 const TIP_SPOTS = [[3, 0], [9, 10], [9, -10], [14, 5], [14, -5]];
 
 export class Game {
@@ -470,7 +472,9 @@ export class Game {
     if (S.t > 1.3) {
       p.screen = null;
       // Roll to the rim after the screen
-      if (p.isUser) p.callT = 1.8; else { p.spot = [4, 0]; p.spotT = 1.8; }
+      if (p.isUser) p.callT = 1.8;
+      else if (this.laneBusy(p)) { p.spot = [21, (p.pos.z >= 0 ? 1 : -1) * 10]; p.spotT = 2.5; } // pop instead of rolling into traffic
+      else { p.spot = [5, 0]; p.spotT = 1.5; }
       return null;
     }
     return { x: p.pos.x, z: p.pos.z, sprint: false };
@@ -492,9 +496,13 @@ export class Game {
     const spd = len(u.vel.x, u.vel.z);
     const h = this.hoopOf(u.team);
     const toward = ((h.x - u.pos.x) * u.vel.x + (h.z - u.pos.z) * u.vel.z) / (dh * Math.max(1, spd));
-    if (dh < 6.5 || (dh < 13 && spd > 9 && toward > 0.4)) {
-      const canDunk = u.r.dunk >= 55 && u.r.vert + u.r.strength * 0.4 >= 70 && (input.sprint || dh < 5);
-      const type = canDunk && chance(0.35 + u.r.dunk / 200) ? 'dunk' : 'layup';
+    const canDunk = this.canDunk(u);
+    const dr = this.dunkRange(u);
+    const attacking = spd > 7 && toward > 0.35;
+    if (dh < 6.5 || (dh < 13 && spd > 9 && toward > 0.4) || (canDunk && attacking && dh < dr)) {
+      // Sprinting at the rim with a dunker always throws it down; otherwise it's usually a dunk too
+      const inRange = dh < (attacking ? dr : 6.5);
+      const type = canDunk && inRange && (input.sprint || chance(0.6 + u.r.dunk / 250)) ? 'dunk' : 'layup';
       this.startFinish(u, type);
       // Layups use the shot meter (dunks don't)
       if (type === 'layup') { u.meterOn = true; u.meter = 0; this.emit('meterStart', { p: u }); }
@@ -837,6 +845,17 @@ export class Game {
     this.resolveShot(p, 'layup', q);
   }
 
+  canDunk(p) { return p.r.dunk >= 55 && p.r.vert + p.r.strength * 0.4 >= 70; }
+  // How far out a player can take off for a dunk on the move (feet from the rim)
+  dunkRange(p) {
+    return 9.5 + clamp((p.r.dunk - 55) / 40, 0, 1) * 4 + clamp((p.r.vert - 55) / 40, 0, 1) * 3 + (p.heightFt - 6.5) * 0.8;
+  }
+  // Dunk jump: rise until the hand clears the rim, higher for bouncier players and flashy dunks
+  dunkApex(p, flashy) {
+    const need = RIM_Y + 1.0 - reachOf(p.heightFt);
+    return Math.max(3.0, need) + clamp((p.r.vert - 55) / 40, 0, 1) * 0.9 + (flashy ? 0.6 : 0);
+  }
+
   // Better dunkers unlock more dunk styles
   pickDunk(p) {
     const r = p.r.dunk;
@@ -864,12 +883,18 @@ export class Game {
     p.shotId = ++this.shotSeq;
     p.holding = false;
     p.post = false;
+    const h = this.hoopOf(p.team);
     if (type === 'dunk') {
       p.dunkStyle = this.pickDunk(p);
       // Flashy dunks need more air time
-      if (['windmill', '360', 'btl'].includes(p.dunkStyle)) { this.setAction(p, 'dunk', 1.25); p.releaseAt = 0.74; p.jumpAtF = 0.28; p.extraHops = true; }
+      p.extraHops = ['windmill', '360', 'btl'].includes(p.dunkStyle);
+      // Long gathers from further out; release at the top of the jump with the hand over the rim
+      const dh = len(p.pos.x - h.x, p.pos.z - h.z);
+      p.jumpAtF = clamp(0.2 + (dh - 4) * 0.022, 0.2, 0.42);
+      p.dunkVy = Math.sqrt(2 * G_PLAYER * this.dunkApex(p, p.extraHops));
+      p.releaseAt = p.jumpAtF + p.dunkVy / G_PLAYER * 0.97;
+      this.setAction(p, 'dunk', p.releaseAt + 0.36);
     }
-    const h = this.hoopOf(p.team);
     let dx = p.pos.x - h.x, dz = p.pos.z - h.z; const l = len(dx, dz) || 1;
     // Don't finish from behind the backboard
     if (Math.sign(dx) === this.dir(p.team) || Math.abs(dx) < 1) { dx = -this.dir(p.team) * 0.8; dz = dz / l; }
@@ -1214,7 +1239,7 @@ export class Game {
     if (p.driveT > 0) {
       p.driveT -= dt;
       p.aiTarget = { x: h.x - d * 3, z: h.z + (p.pos.z > 0 ? 1.5 : -1.5), sprint: true };
-      if (dh < 8.5) this.aiFinish(p);
+      if (dh < 8.5 || (this.canDunk(p) && p.r.dunk >= 70 && dh < Math.min(12, this.dunkRange(p)) && len(p.vel.x, p.vel.z) > 9 && chance(0.35))) this.aiFinish(p);
       return;
     }
     const held = this.time - p.ballSince;
@@ -1330,7 +1355,7 @@ export class Game {
 
   aiFinish(p) {
     p.driveT = 0;
-    const canDunk = p.r.dunk >= 60 && p.r.vert + p.r.strength * 0.4 >= 72;
+    const canDunk = p.r.dunk >= 60 && p.r.vert + p.r.strength * 0.4 >= 72 && this.distHoop(p) < this.dunkRange(p);
     this.startFinish(p, canDunk && chance(0.25 + p.r.dunk / 220) ? 'dunk' : 'layup');
   }
 
@@ -1375,7 +1400,8 @@ export class Game {
       const land = this.predictLanding();
       const d = len(land.x - p.pos.x, land.z - p.pos.z);
       const rank = this.players.filter(q => q.team === p.team && !q.benched && len(land.x - q.pos.x, land.z - q.pos.z) < d).length;
-      if (rank < (b.state === 'loose' ? 2 : 2) || d < 10) {
+      const crash = b.state === 'loose' ? 2 : p.team === this.offense ? 1 : 2;
+      if (rank < crash || d < (b.state === 'loose' ? 10 : 6)) {
         // auto-jump for rebounds
         const bd = len(b.pos.x - p.pos.x, b.pos.z - p.pos.z);
         if (b.state === 'loose' && bd < 4 && b.pos.y > 7 && b.pos.y < 12.5 && b.vel.y < 2 && !p.action && p.y === 0 && p.stun <= 0) {
@@ -1401,10 +1427,19 @@ export class Game {
     return { x: clamp(b.pos.x + b.vel.x * t, -46, 46), z: clamp(b.pos.z + b.vel.z * t, -24, 24) };
   }
 
+  // Is a teammate already in the lane (or cutting into it)?
+  laneBusy(p) {
+    return this.teamPlayers(p.team).some(q => q !== p && !q.hasBall &&
+      (this.inPaint(q, q.team) || (q.spot && q.spotT > 0 && inLane(q.spot[0], q.spot[1]))));
+  }
+
   offSpot(p, dt) {
     p.spotT -= dt;
-    if ((p.paintT || 0) > 1.7 && (!p.spot || (p.spot[0] < 19 && Math.abs(p.spot[1]) < 8))) {
-      p.spot = chance(0.5) ? [6, (p.pos.z >= 0 ? 1 : -1) * 11] : [21, (p.pos.z >= 0 ? 1 : -1) * 10];
+    // Don't camp in the lane: clear out well before three seconds, and right away if it's crowded
+    const inside = this.inPaint(p, p.team);
+    if (inside && ((p.paintT || 0) > 1.0 || (this.laneBusy(p) && (p.paintT || 0) > 0.4)) && (!p.spot || inLane(p.spot[0], p.spot[1]))) {
+      const sz = p.pos.z >= 0 ? 1 : -1;
+      p.spot = chance(0.5) ? [5, sz * 11] : [21, sz * 12];
       p.spotT = 2.5;
     }
     const handler = this.ball.holder;
@@ -1416,12 +1451,13 @@ export class Game {
         const opts = SPOT_POOL.filter(s => len(s[0] - base[0], s[1] - base[1]) < 16);
         choice = opts[Math.floor(Math.random() * opts.length)] || base;
       }
-      // Cut to the basket occasionally if defender is ball watching
+      // Cut to the basket occasionally if defender is ball watching, but only into an empty lane
       const def = this.opp(p);
-      if (def && def.stun > 0 || chance(0.12)) choice = [4, rand(-3, 3)], p.spotT = 1.6;
+      if ((def && def.stun > 0 || chance(0.1)) && !this.laneBusy(p)) choice = [4, rand(-3, 3)], p.spotT = 1.4;
       // Avoid stacking
       const mates = this.teamPlayers(p.team).filter(q => q !== p && q.spot);
-      if (mates.some(q => len(q.spot[0] - choice[0], q.spot[1] - choice[1]) < 6)) choice = base;
+      if (mates.some(q => len(q.spot[0] - choice[0], q.spot[1] - choice[1]) < 8)) choice = base;
+      if (inLane(choice[0], choice[1]) && p.spotT > 1.5) choice = base;
       p.spot = choice;
     }
     const w = this.spotToWorld(p.team, p.spot[0], p.spot[1]);
@@ -1458,6 +1494,10 @@ export class Game {
     if (!man.hasBall && b.holder) {
       // Sag toward the ball
       tx += (b.holder.pos.x - tx) * 0.18; tz += (b.holder.pos.z - tz) * 0.18;
+    }
+    // One help defender may sit in the lane; the rest stay attached to men who aren't in it
+    if (!man.hasBall && this.laneXZ(tx, tz, this.offense) && !this.inPaint(man, this.offense) && this.laneAnchor() !== p) {
+      for (let i = 1; i <= 10 && this.laneXZ(tx, tz, this.offense); i++) { tx += (mx - tx) * 0.2; tz += (mz - tz) * 0.2; }
     }
     // Transition defense: get back
     const manBack = this.dir(this.offense) * mx < -5;
@@ -1584,7 +1624,7 @@ export class Game {
       p.pos.z = clamp(p.pos.z, -24.8 - ob, 24.8 + ob);
 
       // Vertical
-      if (p.action === 'hang') { p.vy = 0; }
+      if (p.action === 'hang') { p.vy = 0; if (p.hangY != null) p.y += (p.hangY - p.y) * (1 - Math.exp(-12 * dt)); }
       else if (p.y > 0 || p.vy > 0) {
         p.vy -= G_PLAYER * dt;
         p.y += p.vy * dt;
@@ -1644,7 +1684,7 @@ export class Game {
     if ((a === 'layup' || a === 'dunk') && !p.released) {
       if (!p.jumped && p.actionT >= (p.jumpAtF || 0.22)) {
         p.jumped = true;
-        p.vy = a === 'dunk' ? Math.max(p.extraHops ? 15.5 : 13.7, Math.sqrt(2 * G_PLAYER * Math.max(1.5, RIM_Y + 0.6 - p.heightFt * 1.28))) : 12 + p.r.vert * 0.04;
+        p.vy = a === 'dunk' ? (p.dunkVy || Math.sqrt(2 * G_PLAYER * this.dunkApex(p, p.extraHops))) : 12 + p.r.vert * 0.04;
       }
       this.checkBlock(p);
       if (a === 'layup' && p.meterOn && p.isUser && !p.released) {
@@ -1656,8 +1696,10 @@ export class Game {
           // Hang on the rim if made
           this.resolveShot(p, 'dunk');
           if (this.ball.shot && this.ball.shot.make) {
-            this.setAction(p, 'hang', 0.6);
-            p.y = Math.max(p.y, RIM_Y + 0.4 - p.heightFt * 1.28);
+            this.setAction(p, 'hang', 0.65);
+            // Hands on the rim: pull down from the top of the jump into a straight-arm hang
+            p.hangY = RIM_Y + 0.15 - reachOf(p.heightFt) * 0.985;
+            p.y = Math.max(p.y, p.hangY);
             this.emit('dunk', { p }); this.bc(p, 'posterizer');
           }
         } else this.resolveShot(p, 'layup');
@@ -1668,6 +1710,21 @@ export class Game {
 
   inPaint(p, team) {
     return COURT_HALF_L - this.dir(team) * p.pos.x < 19 && Math.abs(p.pos.z) < 8;
+  }
+  laneXZ(x, z, team) { return inLane(COURT_HALF_L - this.dir(team) * x, z); }
+  // The defender allowed to protect the rim: the one guarding the off-ball man closest to the basket
+  laneAnchor() {
+    if (this._anchorT === this.time) return this._anchor;
+    this._anchorT = this.time;
+    let best = null, bd = 1e9;
+    for (const q of this.players) {
+      if (q.benched || q.team !== this.offense || q.hasBall) continue;
+      const d = this.distHoop(q);
+      const def = this.opp(q);
+      if (def && !def.benched && d < bd) { bd = d; best = def; }
+    }
+    this._anchor = best;
+    return best;
   }
 
   // Offensive three seconds: no camping in the lane while your team has the ball
@@ -1993,8 +2050,8 @@ export class Game {
     r.lastPassFrom = from; r.catchT = this.time;
     this.setAction(r, 'dunk', 0.6);
     r.actionT = 0.25; r.releaseAt = 0.32; r.jumped = true; r.released = false;
-    r.dunkStyle = chance(0.5) ? 'two' : 'one'; r.post = false;
-    r.y = Math.max(r.y, RIM_Y - r.heightFt * 1.2);
+    r.dunkStyle = chance(0.5) ? 'two' : 'one'; r.post = false; r.jumpAtF = 0.2; r.extraHops = false;
+    r.y = Math.max(r.y, RIM_Y + 0.6 - reachOf(r.heightFt));
     r.vy = 3;
     const h = this.hoopOf(r.team);
     r.finishPt = { x: h.x - this.dir(r.team) * 1.4, z: r.pos.z * 0.2 };

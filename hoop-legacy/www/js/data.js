@@ -165,6 +165,8 @@ export const BUILDS = {
 };
 // Per inch above (or below) the position's standard height.
 export const HEIGHT_MODS = { reb: 1.2, block: 1.2, intD: 1.0, close: 0.6, dunk: 0.3, speed: -1.2, handle: -1.0, three: -0.6, perD: -0.4 };
+// Standing reach (feet) with one arm straight overhead, to the grip of the hand. The 3D model is built to match.
+export function reachOf(heightFt) { return 1.22 * heightFt - 0.2; }
 export function heightIn(ft) { return Math.round(ft * 12); }
 export function fmtHeight(inches) { return `${Math.floor(inches / 12)}'${inches % 12}"`; }
 

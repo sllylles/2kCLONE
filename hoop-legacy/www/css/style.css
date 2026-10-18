@@ -329,6 +329,8 @@ tr.cut td { border-bottom: 2px dashed rgba(255,90,31,.6); }
   letter-spacing: .12em; padding: 4px 12px; border-radius: 4px; font-size: 14px; animation: pulse 1.4s infinite; }
 .rp-label { position: absolute; bottom: calc(9% + 14px); left: calc(16px + var(--safe-l)); font-size: 30px; font-weight: 900; font-style: italic;
   text-shadow: 0 3px 14px rgba(0,0,0,.8); color: var(--gold); }
+.rp-off { position: absolute; top: calc(9% + 6px); right: calc(110px + var(--safe-r)); background: rgba(0,0,0,.5); }
+.ov-card .set-row { text-align: left; }
 .rp-skip { position: absolute; top: calc(9% + 6px); right: calc(14px + var(--safe-r)); background: rgba(0,0,0,.5); }
 
 /* Story choice cards */

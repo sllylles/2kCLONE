@@ -209,7 +209,9 @@ export class PlayerModel {
       thumb.position.set(-sx * 0.1, -0.14, 0.06); thumb.rotation.set(-0.4, 0, -sx * 0.5); wr.add(thumb);
       const hand = new THREE.Object3D(); hand.position.y = -0.2; wr.add(hand);
       const grip = new THREE.Object3D(); grip.position.y = -this.grip; wr.add(grip);
-      return { sh, el, wr, hand, grip, sx };
+      // Where a ball held in this hand sits: against the palm
+      const palmBall = new THREE.Object3D(); palmBall.position.set(0, -0.24, 0.44); wr.add(palmBall);
+      return { sh, el, wr, hand, grip, palmBall, sx };
     };
     this.armL = mkArm(1); this.armR = mkArm(-1);
     if (p.sleeve) {
@@ -275,6 +277,8 @@ export class PlayerModel {
     this.runPhase = Math.random() * 6;
     this.handWorld = new THREE.Vector3();
     this.handWorldL = new THREE.Vector3();
+    this.ballWorld = new THREE.Vector3();
+    this.ballWorldL = new THREE.Vector3();
     this.extraSpin = 0;
     this.yOff = 0;
     this._v = new THREE.Vector3(); this._s = new THREE.Vector3(); this._t = new THREE.Vector3();
@@ -475,20 +479,28 @@ export class PlayerModel {
           T.wR = rel ? 0.9 : -0.3;
           if (!rel) ball = 'R';
         } else {
-          T.sLx = T.sRx = lerp(-1.0, -2.75, ease(g));
-          T.eL = T.eR = rel ? -0.05 : lerp(-1.3, -1.65, g);
-          T.sLz = 0.22; T.sRz = -0.12;
-          T.lean = -0.06;
+          // One-hand jumper: ball on the shooting hand at the set point (elbow under it, wrist cocked),
+          // guide hand on the side. The arm extends through the release so the ball leaves the fingertips.
+          const set = ease(g);
+          const ext = rel ? 1 : ease(clamp01(((p.meter || 0) - 0.7) / 0.3));
+          const hi = p.shotStyle === 'fade' ? -0.2 : 0;
+          T.sRx = lerp(-0.9, lerp(-1.95, -2.7 + hi, ext), set); T.sRz = -0.05;
+          T.eR = lerp(-1.3, lerp(-1.25, -0.05, ext), set);
+          T.wR = rel ? 1.2 : lerp(-0.3, -0.7, set);
+          if (!rel) {
+            T.sLx = lerp(-0.9, -1.85 + hi * 0.5, set); T.sLz = lerp(0.3, 0.38, set); T.eL = lerp(-1.3, -1.05, set); T.wL = -0.2;
+          } else {
+            // Guide hand comes off the ball, shooting hand holds the gooseneck
+            T.sLx = -1.9; T.sLz = 0.7; T.eL = -0.75; T.wL = 0.4;
+          }
+          T.lean = -0.06; T.headX = -0.2;
           if (p.shotStyle === 'fade') {
             // Kobe/MJ fadeaway: lean back, lead knee up, release high
             const up = clamp01((k - 0.18) / 0.25);
-            T.lean = -0.5 * up; T.hLx = -1.15 * up; T.kL = 0.3 + 1.1 * up; T.hRx = 0.25 * up; T.kR = 0.15;
-            T.sLx = T.sRx = lerp(-1.0, -2.95, ease(g)); T.headX = -0.15 * up;
+            T.lean = -0.5 * up; T.hLx = -1.15 * up; T.kL = 0.3 + 1.1 * up; T.hRx = 0.25 * up; T.kR = 0.15; T.headX = -0.15 * up;
             if (p.turnaround) spin = (p.turnSide || 1) * Math.PI * (1 - ease(clamp01(k / 0.28)));
           }
-          if (rel) { T.sLx = -2.4; T.sLz = 0.4; }
-          T.wR = rel ? 1.15 : -0.85; T.wL = rel ? 0.5 : -0.5;
-          if (!rel) ball = 'over';
+          if (!rel) ball = 'R';
         }
         if (p.ft) { T.hLx = T.hRx = 0; }
         break;
@@ -734,7 +746,7 @@ export class PlayerModel {
     }
 
     // Blend; snappier while performing actions
-    const kBlend = act ? (act === 'fall' || act === 'posterfall' ? 14 : 24) : 13;
+    const kBlend = act ? (act === 'fall' || act === 'posterfall' ? 14 : act === 'shoot' || act === 'layup' ? 34 : 24) : 13;
     for (const key in T) this.pose[key] = damp(this.pose[key], T[key], kBlend, dt);
     this.extraSpin = act && spin !== 0 ? spin : damp(this.extraSpin, 0, 20, dt);
     const P = this.pose;
@@ -768,6 +780,7 @@ export class PlayerModel {
     this.legR.an.rotation.x = lerp(-(hR + kR), 0.5, air) + P.fR;
     this.root.updateMatrixWorld(true);
     this.rimReach(p, act, k, dt);
+    this.blockReach(p, game, act);
 
     this.blob.scale.setScalar(Math.max(0.5, 1 - yJump * 0.08));
     this.blob.material.opacity = 0.28 * Math.max(0.35, 1 - yJump * 0.12);
@@ -777,6 +790,8 @@ export class PlayerModel {
     }
     this.armR.hand.getWorldPosition(this.handWorld);
     this.armL.hand.getWorldPosition(this.handWorldL);
+    this.armR.palmBall.getWorldPosition(this.ballWorld);
+    this.armL.palmBall.getWorldPosition(this.ballWorldL);
     return ball;
   }
 
@@ -832,6 +847,36 @@ export class PlayerModel {
     this.body.position.y += this.yOff - prevOff;
     this.root.updateMatrixWorld(true);
     for (const [arm, T] of arms) this.aimArm(arm, T, w);
+  }
+
+  // Shot blocks: the blocking hand goes to the ball and meets it at the swat
+  blockReach(p, game, act) {
+    if (act !== 'block' || !game.ball || p.hasBall) return;
+    const b = game.ball;
+    const bp = b.vis || b.pos;
+    if (!bp) return;
+    const since = game.time - (p.swatT || -9);
+    const arm = p.blockStyle === 'one' && p.blockHand === 'L' ? this.armL : this.armR;
+    const S = arm.sh.getWorldPosition(this._s);
+    const L = this.ua + this.fa + this.grip;
+    const T = new THREE.Vector3(bp.x, bp.y, bp.z);
+    const d = S.distanceTo(T);
+    let w;
+    if (since >= 0 && since < 0.22) w = 1; // contact
+    else if (since >= 0.22 && since < 0.45) w = 1 - (since - 0.22) / 0.23; // follow through
+    else w = clamp01((L + 1.6 - d) / 1.6) * 0.85; // reaching for it
+    if (w <= 0.01) return;
+    // Out of reach: point at it with a straight arm (the target is pulled in to arm's length)
+    if (d > L) T.sub(S).multiplyScalar(L / d).add(S);
+    this.aimArm(arm, T, w);
+    if (p.blockStyle !== 'one' && p.blockStyle !== 'chase') {
+      const other = arm === this.armR ? this.armL : this.armR;
+      const S2 = other.sh.getWorldPosition(this._s).clone();
+      const T2 = new THREE.Vector3(bp.x, bp.y, bp.z);
+      const d2 = S2.distanceTo(T2);
+      if (d2 > L) T2.sub(S2).multiplyScalar(L / d2).add(S2);
+      this.aimArm(other, T2, w * 0.9);
+    }
   }
 
   // Point an arm at a world-space target: straight when it can't quite reach, elbow bent when close.

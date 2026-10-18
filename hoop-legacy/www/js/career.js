@@ -5,7 +5,12 @@ import { TEAMS, SHOWCASE_TEAMS, GLEAGUE_NICKS, POSITIONS, POS_ORDER, PLAYSTYLES,
 const SAVE_KEY = 'hoops.career.v1';
 const SETTINGS_KEY = 'hoops.settings.v1';
 
-export const DEFAULT_SETTINGS = { qLen: 3, difficulty: 1, seasonLength: 16, seriesLen: 'short', quality: 'high', defAssist: false, camera: '2k', replays: true, sound: true, vibrate: true };
+export const DEFAULT_SETTINGS = { qLen: 3, difficulty: 1, seasonLength: 16, seriesLen: 'short', quality: 'high', defAssist: false, camera: '2k', replays: true, sound: true, vibrate: true, maxed: false };
+
+// Infinite AP + all badges (Hall of Fame) while on. Doesn't touch the save, so turning it off restores real progress.
+let maxed = false;
+export function setMaxed(v) { maxed = !!v; }
+export function isMaxed() { return maxed; }
 
 export function loadSettings() {
   try {
@@ -75,7 +80,7 @@ export function startingRatings(pos, style, rng = Math.random, inches = null, bu
 
 export function badgeTiers(c) {
   const out = {};
-  for (const k in BADGES) out[k] = badgeTier(k, (c.badges || {})[k] || 0);
+  for (const k in BADGES) out[k] = maxed ? BADGES[k].need.length : badgeTier(k, (c.badges || {})[k] || 0);
   return out;
 }
 
@@ -582,8 +587,8 @@ export function upgrade(c, key) {
   const v = c.player.ratings[key];
   if (v >= 99) return false;
   const cost = upgradeCost(v);
-  if (c.ap < cost) return false;
-  c.ap -= cost;
+  if (!maxed && c.ap < cost) return false;
+  if (!maxed) c.ap -= cost;
   c.player.ratings[key] = v + 1;
   return true;
 }

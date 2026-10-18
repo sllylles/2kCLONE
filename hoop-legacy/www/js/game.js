@@ -954,7 +954,19 @@ export class Game {
       const r = p.r.close * 0.75 + p.r.strength * 0.25;
       prob = (0.3 + r / 99 * 0.45 + (dh < 6 ? 0.05 : 0)) * (1 - 0.5 * c2);
     }
-    else if (kind === 'dunk') prob = 0.72 + p.r.dunk / 99 * 0.26 - c * 0.35;
+    else if (kind === 'dunk') {
+      // A dunk is only bothered by someone actually challenging at the rim (close and off the floor),
+      // not by every defender standing in the paint
+      let dc = 0;
+      for (const q of this.players) {
+        if (q.team === p.team || q.benched || q.stun > 0) continue;
+        const d = len(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
+        if (d > 5 || (q.y < 0.5 && q.action !== 'block')) continue;
+        dc = Math.max(dc, clamp(1 - (d - 1.5) / 3.5, 0, 1) * (0.55 + q.r.block / 220));
+      }
+      const legs = clamp((p.r.vert + p.r.strength) / 2 - 50, 0, 40) / 400;
+      prob = 0.88 + p.r.dunk / 99 * 0.1 + legs - dc * (0.32 - p.r.dunk / 99 * 0.12);
+    }
     else if (kind === 'layup') prob = (0.5 + p.r.layup / 99 * 0.42) * (1 - 0.4 * c * (1 - this.bt(p, 'acrobat') * 0.12)) * (1 + this.bt(p, 'acrobat') * 0.03);
     else {
       let r = dh < 10 ? p.r.close : three ? p.r.three : p.r.mid;
@@ -1764,6 +1776,8 @@ export class Game {
       let pb = 0.05 + (q.r.block - 50) / 170 + (reach - sReach) * 0.06 + (shooter.action === 'shoot' ? -0.03 : 0.03) + this.bt(q, 'rimProtector') * 0.03;
       // Chase-down: the shooter can't see you coming
       if (this.isBehind(q, shooter) && (shooter.action === 'layup' || shooter.action === 'dunk')) pb += 0.1;
+      // Dunks are hard to block from the front: the ball is already over the rim
+      else if (shooter.action === 'dunk') pb *= 0.5 - clamp((shooter.r.dunk - 60) / 200, 0, 0.2);
       if (shooter.isUser) pb *= [0.5, 0.8, 1, 1.15][this.diff];
       pb = clamp(pb, 0.02, q.isUser ? 0.45 : 0.3);
       if (chance(pb)) { this.blockShot(q, shooter); return true; }
@@ -1799,7 +1813,12 @@ export class Game {
     b.holder = null; b.state = 'loose'; b.lastTouch = def.team; b.rimmed = true;
     b.noGrab = { p: shooter, until: this.time + 0.6, all: this.time + 0.15 };
     const start = b.vis ? { ...b.vis } : { x: shooter.pos.x, y: shooter.heightFt + 1 + shooter.y, z: shooter.pos.z };
+    // The swat happens where the blocker's hand meets the ball: pull the ball to within the blocker's reach
+    const shY = def.y + 0.78 * def.heightFt - 0.2, armL = (reachOf(def.heightFt) - (0.81 * def.heightFt - 0.2)) * 0.7;
+    const ox = start.x - def.pos.x, oy = start.y - shY, oz = start.z - def.pos.z, ol = Math.hypot(ox, oy, oz) || 1;
+    if (ol > armL) { const f = armL / ol; start.x = def.pos.x + ox * f; start.y = shY + oy * f; start.z = def.pos.z + oz * f; }
     b.pos = start;
+    b.vis = { ...start };
     const dx = shooter.pos.x - def.pos.x, dz = shooter.pos.z - def.pos.z, l = len(dx, dz) || 1;
     if (chaseDown) {
       // Pinned off the glass: ball drops back into play

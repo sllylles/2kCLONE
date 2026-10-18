@@ -359,9 +359,11 @@ export class Renderer {
       } else if (mode === 'both') {
         bp.set((m.handWorld.x + m.handWorldL.x) / 2 + fx * 0.25, (m.handWorld.y + m.handWorldL.y) / 2 + 0.1, (m.handWorld.z + m.handWorldL.z) / 2 + fz * 0.25);
       } else if (mode === 'over') {
-        bp.set((m.handWorld.x + m.handWorldL.x) / 2, Math.max(m.handWorld.y, m.handWorldL.y) + 0.35, (m.handWorld.z + m.handWorldL.z) / 2);
+        // Two hands on the ball overhead
+        bp.set((m.ballWorld.x + m.ballWorldL.x) / 2, (m.ballWorld.y + m.ballWorldL.y) / 2 + 0.1, (m.ballWorld.z + m.ballWorldL.z) / 2);
       } else if (mode === 'R') {
-        bp.set(m.handWorld.x, m.handWorld.y + 0.35, m.handWorld.z);
+        // Ball resting in the right palm
+        bp.copy(m.ballWorld);
       }
       // Let the sim know where the ball visually is (used for release point).
       ball.vis = { x: bp.x, y: bp.y, z: bp.z };

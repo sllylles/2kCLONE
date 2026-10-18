@@ -13,6 +13,8 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
 let settings = C.loadSettings();
+C.setMaxed(settings.maxed);
+const apText = c => C.isMaxed() ? '∞ AP' : `${c.ap} AP`;
 let career = C.loadCareer();
 let screenStack = [];
 setMuted(!settings.sound);
@@ -210,7 +212,7 @@ function renderHub() {
   const P = c.player;
   const phaseName = { hs: 'HIGH SCHOOL · SENIOR YEAR', college: `COLLEGE · YEAR ${c.college ? c.college.year : 1}`, showcase: c.storyV === 2 ? 'DRAFT COMBINE' : 'PROSPECT SHOWCASE', gleague: 'G LEAGUE', nba: `SEASON ${c.season}`, playoffs: 'PLAYOFFS' }[c.phase] || 'MYCAREER';
   $('hubPhase').textContent = phaseName;
-  $('hubAP').textContent = `${c.ap} AP`;
+  $('hubAP').textContent = apText(c);
   let teamLine = '';
   if (c.phase === 'hs') teamLine = c.hs.team.name;
   else if (c.phase === 'college') teamLine = c.college.team.name;
@@ -250,7 +252,7 @@ function renderHub() {
       finishMatch(info, res);
     });
   };
-  $('hubUpgrade').innerHTML = `<b>UPGRADE ${c.ap > 0 ? `<span class="badge">${c.ap}</span>` : ''}</b><small>Spend attribute points</small>`;
+  $('hubUpgrade').innerHTML = `<b>UPGRADE ${c.ap > 0 || C.isMaxed() ? `<span class="badge">${C.isMaxed() ? '∞' : c.ap}</span>` : ''}</b><small>Spend attribute points</small>`;
   $('hubStandings').style.display = c.nba ? '' : 'none';
 }
 
@@ -273,7 +275,7 @@ function renderBadges() {
     html += `<div class="up-group">${cat.toUpperCase()}</div><div class="badge-grid">`;
     for (const [k, b] of Object.entries(BADGES)) {
       if (b.cat !== cat) continue;
-      const n = prog[k] || 0, t = badgeTier(k, n);
+      const n = prog[k] || 0, t = C.isMaxed() ? BADGE_TIERS.length : badgeTier(k, n);
       const next = b.need[t], prev = t ? b.need[t - 1] : 0;
       const pct = next ? Math.min(100, (n - prev) / (next - prev) * 100) : 100;
       html += `<div class="badge-row">${badgeChip(k, t)}<div class="bi"><b>${b.name}</b> <em style="color:${t ? BADGE_COLORS[t - 1] : 'var(--dim)'}">${t ? BADGE_TIERS[t - 1] : 'Locked'}</em>
@@ -297,14 +299,14 @@ $('hubMenu').onclick = () => {
 
 function renderUpgrade() {
   const c = career, r = c.player.ratings;
-  $('upAP').textContent = `${c.ap} AP`;
+  $('upAP').textContent = apText(c);
   $('upOVR').textContent = `${C.userOverall(c)} OVR`;
   let html = '', group = '';
   for (const a of ATTRS) {
     if (a.group !== group) { group = a.group; html += `<div class="up-group">${group.toUpperCase()}</div>`; }
     const v = r[a.key], cost = upgradeCost(v);
     html += `<div class="up-row" id="up_${a.key}"><div><div class="nm">${a.name}</div><div class="track"><i style="width:${v}%"></i></div></div>
-      <div class="val">${v}</div><button class="plus" data-k="${a.key}" ${c.ap < cost || v >= 99 ? 'disabled' : ''}>+1<small>${v >= 99 ? 'MAX' : cost + ' AP'}</small></button></div>`;
+      <div class="val">${v}</div><button class="plus" data-k="${a.key}" ${(!C.isMaxed() && c.ap < cost) || v >= 99 ? 'disabled' : ''}>+1<small>${v >= 99 ? 'MAX' : cost + ' AP'}</small></button></div>`;
   }
   $('upList').innerHTML = html;
   $('upList').querySelectorAll('.plus').forEach(b => b.addEventListener('click', () => {
@@ -362,6 +364,7 @@ function renderSettings() {
     <div class="set-row"><label>Auto Defensive Assist<small>Also guard your man automatically whenever the stick is idle (the DEF ASSIST stick always works)</small></label>${seg('defAssist', [[true, 'On'], [false, 'Off']])}</div>
     <div class="set-row"><label>Button Layout<small>Move and resize buttons from the in-game pause menu (MOVE BUTTONS)</small></label><button class="btn ghost" id="resetLayout">RESET LAYOUT</button></div>
     <div class="set-row"><label>Replays<small>Instant replays of big plays and a highlight reel after each game</small></label>${seg('replays', [[true, 'On'], [false, 'Off']])}</div>
+    <div class="set-row"><label>Infinite AP + All Badges<small>Upgrades cost nothing and every badge is Hall of Fame. Turn off to go back to your earned progress</small></label>${seg('maxed', [[true, 'On'], [false, 'Off']])}</div>
     <div class="set-row"><label>Sound</label>${seg('sound', [[true, 'On'], [false, 'Off']])}</div>
     <div class="set-row"><label>Vibration</label>${seg('vibrate', [[true, 'On'], [false, 'Off']])}</div>
     <p style="color:var(--dim);font-size:12px">Season length applies from the next season you start.</p>`;
@@ -373,6 +376,7 @@ function renderSettings() {
     settings[b.dataset.s] = v;
     C.saveSettings(settings);
     setMuted(!settings.sound);
+    C.setMaxed(settings.maxed);
     if (b.dataset.s === 'quality') renderer = null;
     renderSettings();
   }));
@@ -507,6 +511,33 @@ function runReplay(dt, now) {
   renderer.render(st.game, dt * st.rate, now / 1000);
 }
 
+// Quick settings from the pause menu
+function gameSettings(resume) {
+  const seg = (key, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-s="${key}" data-v="${v}" class="${String(settings[key]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  overlay(`<div class="ov-card"><h1>SETTINGS</h1>
+    <div class="set-row"><label>Replays</label>${seg('replays', [[true, 'On'], [false, 'Off']])}</div>
+    <div class="set-row"><label>Infinite AP + All Badges<small>Upgrades are free and every badge is Hall of Fame</small></label>${seg('maxed', [[true, 'On'], [false, 'Off']])}</div>
+    <div class="set-row"><label>Sound</label>${seg('sound', [[true, 'On'], [false, 'Off']])}</div>
+    <div class="ov-btns"><button class="btn primary" id="gsBack">RESUME</button></div></div>`);
+  $('gameOverlay').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => {
+    sfx.click();
+    settings[b.dataset.s] = b.dataset.v === 'true';
+    C.saveSettings(settings);
+    setMuted(!settings.sound);
+    C.setMaxed(settings.maxed);
+    if (game && career) game.badgeTiers = C.badgeTiers(career);
+    gameSettings(resume);
+  }));
+  $('gsBack').onclick = resume;
+}
+
+// Turn replays off for good, right from a replay
+$('rpOff').onclick = () => {
+  settings.replays = false;
+  C.saveSettings(settings);
+  if (replay) endReplay();
+};
+
 $('rpSkip').onclick = () => {
   if (!replay) return;
   if (replay.kind === 'reel') { replay.skipClip(); if (replay.done) endReplay(); }
@@ -596,10 +627,11 @@ $('btnPause').onclick = () => {
   if (!game || paused || game.phase === 'over') return;
   paused = true;
   overlay(`<div class="ov-card"><h1>PAUSED</h1><p>${game.score[0]} - ${game.score[1]} · Q${game.quarter}</p>
-    <div class="ov-btns"><button class="btn" id="pHelp">CONTROLS</button><button class="btn" id="pEdit">MOVE BUTTONS</button><button class="btn danger" id="pQuit">SIM TO END</button><button class="btn primary" id="pRes">RESUME</button></div></div>`);
+    <div class="ov-btns"><button class="btn" id="pHelp">CONTROLS</button><button class="btn" id="pEdit">MOVE BUTTONS</button><button class="btn" id="pSet">SETTINGS</button><button class="btn danger" id="pQuit">SIM TO END</button><button class="btn primary" id="pRes">RESUME</button></div></div>`);
   const resume = () => { paused = false; overlay(null); last = performance.now(); };
   $('pRes').onclick = resume;
   $('pHelp').onclick = () => showHelp(resume);
+  $('pSet').onclick = () => gameSettings(resume);
   $('pEdit').onclick = () => { overlay(null); controls.edit(() => { overlay(`<div class="ov-card"><h1>LAYOUT SAVED</h1><div class="ov-btns"><button class="btn primary" id="pRes2">RESUME</button></div></div>`); $('pRes2').onclick = resume; }); };
   $('pQuit').onclick = () => {
     // Sim the rest of regulation

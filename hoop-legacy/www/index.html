@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#07080c">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Hoop Legacy</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">{ "imports": { "three": "./js/lib/three.module.min.js" } }</script>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <div id="app">
+    <!-- Title -->
+    <section class="screen" id="scrTitle">
+      <div class="title-bg"></div>
+      <div class="title-wrap">
+        <div class="logo"><span class="l1">HOOP</span><span class="l2">LEGACY</span></div>
+        <div class="logo-sub">MYCAREER</div>
+        <div class="title-btns">
+          <button class="btn primary" id="btnContinue">CONTINUE CAREER</button>
+          <button class="btn" id="btnNew">NEW CAREER</button>
+          <button class="btn ghost" id="btnTitleSettings">SETTINGS</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Creator -->
+    <section class="screen" id="scrCreate">
+      <header class="bar"><button class="back" data-back>‹</button><h2>CREATE YOUR PLAYER</h2><div class="steps" id="createSteps"></div></header>
+      <div class="create-body">
+        <div class="create-main" id="createMain"></div>
+        <aside class="create-side">
+          <div class="pcard" id="createCard"></div>
+        </aside>
+      </div>
+      <footer class="bar bottom"><button class="btn ghost" id="createPrev">BACK</button><button class="btn primary" id="createNext">NEXT</button></footer>
+    </section>
+
+    <!-- Story -->
+    <section class="screen" id="scrStory">
+      <div class="story">
+        <div class="story-title" id="storyTitle"></div>
+        <div class="story-speaker" id="storySpeaker"></div>
+        <div class="story-line" id="storyLine"></div>
+        <div class="story-tap">TAP TO CONTINUE</div>
+      </div>
+    </section>
+
+    <!-- Hub -->
+    <section class="screen" id="scrHub">
+      <header class="bar"><h2 id="hubPhase">MYCAREER</h2><div class="ap-chip" id="hubAP"></div><button class="icon-btn" id="hubMenu">☰</button></header>
+      <div class="hub">
+        <div class="pcard" id="hubCard"></div>
+        <div class="next-game" id="hubNext"></div>
+        <div class="hub-side">
+          <button class="tile" id="hubUpgrade"><b>UPGRADE</b><small>Spend attribute points</small></button>
+          <button class="tile" id="hubStandings"><b>STANDINGS</b><small>League table</small></button>
+          <button class="tile" id="hubHistory"><b>CAREER</b><small>Stats &amp; history</small></button>
+          <button class="tile" id="hubBadges"><b>BADGES</b><small>Earned skills</small></button>
+          <button class="tile" id="hubStyle"><b>MY PLAYER</b><small>Dribble &amp; jumpshot</small></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Upgrade -->
+    <section class="screen" id="scrUpgrade">
+      <header class="bar"><button class="back" data-back>‹</button><h2>UPGRADE</h2><div class="ap-chip" id="upAP"></div><div class="ovr-chip" id="upOVR"></div></header>
+      <div class="upgrade" id="upList"></div>
+    </section>
+
+    <!-- Generic list screen -->
+    <section class="screen" id="scrList">
+      <header class="bar"><button class="back" data-back>‹</button><h2 id="listTitle"></h2></header>
+      <div class="list" id="listBody"></div>
+    </section>
+
+    <!-- Draft -->
+    <section class="screen" id="scrDraft">
+      <div class="draft" id="draftBody"></div>
+    </section>
+
+    <!-- Settings -->
+    <section class="screen" id="scrSettings">
+      <header class="bar"><button class="back" data-back>‹</button><h2>SETTINGS</h2></header>
+      <div class="list" id="settingsBody"></div>
+    </section>
+
+    <!-- Game -->
+    <section class="screen" id="scrGame">
+      <div class="hud">
+        <div class="hud-user"><div class="hu-name" id="huName"></div><div class="hu-grade" id="huGrade">C</div><div class="hu-energy"><i id="huEnergy"></i></div><div class="hu-stats" id="huStats"></div><div class="hu-match" id="huMatch"></div></div>
+        <div class="scoreboard">
+          <div class="sb-team" id="sbA"><span class="abbr"></span><span class="pts">0</span></div>
+          <div class="sb-mid"><div class="sb-q" id="sbQ">1ST</div><div class="sb-clock" id="sbClock">3:00</div><div class="sb-shot" id="sbShot">24</div></div>
+          <div class="sb-team" id="sbB"><span class="pts">0</span><span class="abbr"></span></div>
+        </div>
+        <button class="icon-btn pause" id="btnPause">❚❚</button>
+        <div class="feed" id="gradeFeed"></div>
+        <div class="toast" id="toast"></div>
+        <div class="callout" id="callout"></div>
+        <div class="meter" id="meter"><div class="m-win" id="meterWin"></div><div class="m-fill" id="meterFill"></div></div>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="replay-ui" id="replayUI"><div class="rp-bar top"></div><div class="rp-bar bottom"></div>
+        <div class="rp-tag" id="rpTag">REPLAY</div><div class="rp-label" id="rpLabel"></div>
+        <button class="btn ghost rp-skip" id="rpSkip">SKIP ›</button></div>
+      <div class="overlay" id="gameOverlay"></div>
+    </section>
+
+    <!-- Post game -->
+    <section class="screen" id="scrPost">
+      <div class="post" id="postBody"></div>
+    </section>
+  </div>
+  <div class="rotate">↻ Rotate your phone to landscape</div>
+  <div class="modal" id="modal"></div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

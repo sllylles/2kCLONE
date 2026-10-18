@@ -1,0 +1,10 @@
+{
+  "name": "Hoop Legacy: MyCareer",
+  "short_name": "Hoop Legacy",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#07080c",
+  "theme_color": "#07080c",
+  "icons": [{ "src": "icon.png", "sizes": "512x512", "type": "image/png" }]
+}

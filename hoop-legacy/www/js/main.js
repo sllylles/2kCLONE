@@ -290,10 +290,17 @@ $('hubMenu').onclick = () => {
   sfx.click();
   const m = $('modal');
   m.innerHTML = `<div class="ov-card"><h1>MENU</h1><div class="ov-btns" style="flex-direction:column">
-    <button class="btn" id="mmSettings">SETTINGS</button><button class="btn" id="mmTitle">MAIN MENU</button><button class="btn ghost" id="mmClose">CLOSE</button></div></div>`;
+    <button class="btn" id="mmMaxed">INFINITE AP + ALL BADGES: ${settings.maxed ? 'ON' : 'OFF'}</button><button class="btn" id="mmSettings">SETTINGS</button><button class="btn" id="mmTitle">MAIN MENU</button><button class="btn ghost" id="mmClose">CLOSE</button></div></div>`;
   m.classList.add('on');
   $('mmClose').onclick = () => m.classList.remove('on');
   $('mmSettings').onclick = () => { m.classList.remove('on'); renderSettings(); };
+  $('mmMaxed').onclick = () => {
+    sfx.click();
+    settings.maxed = !settings.maxed;
+    C.saveSettings(settings); C.setMaxed(settings.maxed);
+    $('mmMaxed').textContent = `INFINITE AP + ALL BADGES: ${settings.maxed ? 'ON' : 'OFF'}`;
+    renderHub();
+  };
   $('mmTitle').onclick = () => { m.classList.remove('on'); renderTitle(); };
 };
 
@@ -355,6 +362,7 @@ function renderSettings() {
   const S = settings;
   const seg = (key, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-s="${key}" data-v="${v}" class="${String(S[key]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
   $('settingsBody').innerHTML = `
+    <div class="set-row"><label>Infinite AP + All Badges<small>Upgrades cost nothing and every badge is Hall of Fame. Turn off to go back to your earned progress</small></label>${seg('maxed', [[true, 'On'], [false, 'Off']])}</div>
     <div class="set-row"><label>Quarter Length</label>${seg('qLen', [[2, '2 min'], [3, '3 min'], [5, '5 min'], [8, '8 min']])}</div>
     <div class="set-row"><label>Difficulty</label>${seg('difficulty', [[0, 'Rookie'], [1, 'Pro'], [2, 'All-Star'], [3, 'Hall of Fame']])}</div>
     <div class="set-row"><label>Season Length<small>Regular season games you play</small></label>${seg('seasonLength', [[10, '10'], [16, '16'], [29, '29'], [41, '41']])}</div>
@@ -364,7 +372,6 @@ function renderSettings() {
     <div class="set-row"><label>Auto Defensive Assist<small>Also guard your man automatically whenever the stick is idle (the DEF ASSIST stick always works)</small></label>${seg('defAssist', [[true, 'On'], [false, 'Off']])}</div>
     <div class="set-row"><label>Button Layout<small>Move and resize buttons from the in-game pause menu (MOVE BUTTONS)</small></label><button class="btn ghost" id="resetLayout">RESET LAYOUT</button></div>
     <div class="set-row"><label>Replays<small>Instant replays of big plays and a highlight reel after each game</small></label>${seg('replays', [[true, 'On'], [false, 'Off']])}</div>
-    <div class="set-row"><label>Infinite AP + All Badges<small>Upgrades cost nothing and every badge is Hall of Fame. Turn off to go back to your earned progress</small></label>${seg('maxed', [[true, 'On'], [false, 'Off']])}</div>
     <div class="set-row"><label>Sound</label>${seg('sound', [[true, 'On'], [false, 'Off']])}</div>
     <div class="set-row"><label>Vibration</label>${seg('vibrate', [[true, 'On'], [false, 'Off']])}</div>
     <p style="color:var(--dim);font-size:12px">Season length applies from the next season you start.</p>`;

@@ -311,9 +311,9 @@ function renderUpgrade() {
   let html = '', group = '';
   for (const a of ATTRS) {
     if (a.group !== group) { group = a.group; html += `<div class="up-group">${group.toUpperCase()}</div>`; }
-    const v = r[a.key], cost = upgradeCost(v);
-    html += `<div class="up-row" id="up_${a.key}"><div><div class="nm">${a.name}</div><div class="track"><i style="width:${v}%"></i></div></div>
-      <div class="val">${v}</div><button class="plus" data-k="${a.key}" ${(!C.isMaxed() && c.ap < cost) || v >= 99 ? 'disabled' : ''}>+1<small>${v >= 99 ? 'MAX' : cost + ' AP'}</small></button></div>`;
+    const v = r[a.key], cost = upgradeCost(v), cap = C.capOf(c, a.key), maxed = v >= cap;
+    html += `<div class="up-row" id="up_${a.key}"><div><div class="nm">${a.name}</div><div class="track"><i style="width:${v}%"></i><b class="cap" style="left:${cap}%"></b></div></div>
+      <div class="val">${v}<small class="capv">/${cap}</small></div><button class="plus" data-k="${a.key}" ${(!C.isMaxed() && c.ap < cost) || maxed ? 'disabled' : ''}>+1<small>${maxed ? 'MAX' : cost + ' AP'}</small></button></div>`;
   }
   $('upList').innerHTML = html;
   $('upList').querySelectorAll('.plus').forEach(b => b.addEventListener('click', () => {
@@ -663,6 +663,7 @@ function onGameEvent(type, d) {
       else if (d.p.isUser && d.three) markPlay('three', d.p, 5, 'FROM DOWNTOWN', false);
       else if (d.assister && d.assister.isUser) markPlay('assist', d.assister, 3, 'THE DIME', false);
       sfx.cheer(d.p.team === game.userTeam ? 1 : 0.5);
+      renderer.hype = Math.max(renderer.hype || 0, d.p.team === game.homeIdx ? (d.three ? 0.8 : 0.55) : 0.3);
       if (d.p.isUser) toast(d.three ? '+3' : '+2', '#ffd23f');
       else if (d.assister && d.assister.isUser) toast('ASSIST', '#3ddc84');
       break;
@@ -678,14 +679,15 @@ function onGameEvent(type, d) {
     case 'screen': sfx.thud(); callout(d.screener.isUser ? 'GREAT SCREEN!' : 'SCREEN!', '#ffd23f'); break;
     case 'screenSet': if (d.for.isUser) callout('SCREEN SET, USE IT!', '#ffd23f'); break;
     case 'contact': sfx.thud(); if (d.power >= 4 && (d.p.isUser || d.p === game.matchup(game.user))) renderer.shake = Math.max(renderer.shake, 0.12); break;
-    case 'poster': markPlay('poster', d.p, d.p.isUser || d.def.isUser ? 10 : 7, 'POSTERIZED!', true); toast(d.p.isUser ? 'POSTERIZED!' : d.def.isUser ? 'YOU GOT POSTERIZED' : 'POSTERIZED!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.6; if (d.p.isUser) vib(90); break;
+    case 'poster': renderer.hype = 1.6; markPlay('poster', d.p, d.p.isUser || d.def.isUser ? 10 : 7, 'POSTERIZED!', true); toast(d.p.isUser ? 'POSTERIZED!' : d.def.isUser ? 'YOU GOT POSTERIZED' : 'POSTERIZED!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.6; if (d.p.isUser) vib(90); break;
     case 'charge': toast(d.def.isUser ? 'CHARGE TAKEN!' : 'CHARGE', d.def.team === game.userTeam ? '#3ddc84' : '#e5484d'); break;
-    case 'ankle': if (d.p.isUser) markPlay('ankle', d.p, 8, 'ANKLE BREAKER', true); toast('ANKLE BREAKER!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.35; vib(60); break;
+    case 'ankle': renderer.hype = Math.max(renderer.hype || 0, 1.2); if (d.p.isUser) markPlay('ankle', d.p, 8, 'ANKLE BREAKER', true); toast('ANKLE BREAKER!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.35; vib(60); break;
     case 'beat': if (d.p.isUser) callout('BLOW-BY', '#ffd23f'); sfx.squeak(); break;
     case 'block': {
       const bl = d.type === 'chase' ? 'CHASE-DOWN BLOCK!' : d.type === 'snatch' ? 'SNATCHED!' : d.def.isUser ? 'BLOCKED BY YOU!' : 'BLOCKED!';
       if (d.def.isUser) markPlay('block', d.def, d.type === 'swat' ? 7 : 9, d.type === 'chase' ? 'CHASE-DOWN BLOCK' : d.type === 'snatch' ? 'SNATCHED' : 'REJECTED!', true);
       else if (d.type !== 'swat') markPlay('block', d.def, 5, d.type === 'chase' ? 'CHASE-DOWN BLOCK' : 'SNATCHED', false);
+      renderer.hype = Math.max(renderer.hype || 0, 1.1);
       toast(bl, d.def.team === game.userTeam ? '#3ddc84' : '#e5484d'); sfx.block(); renderer.shake = d.type === 'swat' ? 0.2 : 0.35; if (d.def.isUser) vib(40); break;
     }
     case 'steal': sfx.steal(); if (d.def.isUser) { toast('STOLEN!', '#3ddc84'); vib(40); } else if (d.h && d.h.isUser) toast('TURNOVER', '#e5484d'); break;
@@ -693,7 +695,7 @@ function onGameEvent(type, d) {
       const dn = DUNK_NAMES[d.p.dunkStyle] || 'SLAM!';
       const flashy = ['windmill', '360', 'btl', 'reverse', 'contact'].includes(d.p.dunkStyle);
       markPlay('dunk', d.p, d.p.isUser ? (flashy ? 8 : 7) : flashy ? 5 : 3, dn, d.p.isUser);
-      sfx.dunk(); renderer.shake = 0.45;
+      sfx.dunk(); renderer.shake = 0.45; renderer.hype = Math.max(renderer.hype || 0, flashy ? 1.4 : 1.1);
       if (d.p.isUser) { toast(dn, '#ff5a1f'); vib(70); }
       break;
     }
@@ -862,6 +864,7 @@ function updateHUD(dt) {
     const w = g.meterWindow(u);
     $('meterWin').style.bottom = ((1 - w) / max) * H + 'px';
     $('meterWin').style.height = Math.max(3, (2 * w / max) * H) + 'px';
+    $('meterWin').style.display = w > 0 ? '' : 'none'; // out of range: no green to hit
     m.classList.toggle('green', ui.meterResult === 'green');
     m.classList.toggle('ok', ui.meterResult === 'ok');
     m.classList.toggle('bad', ui.meterResult === 'bad');

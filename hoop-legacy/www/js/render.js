@@ -117,26 +117,85 @@ function courtTexture(homeTeam) {
   return tex;
 }
 
-function crowdTexture() {
-  const cv = document.createElement('canvas');
-  cv.width = 512; cv.height = 128;
-  const g = cv.getContext('2d');
-  g.fillStyle = '#15161c'; g.fillRect(0, 0, 512, 128);
-  const cols = ['#c0392b', '#2980b9', '#f1c40f', '#ecf0f1', '#8e44ad', '#27ae60', '#d35400', '#7f8c8d', '#2c3e50'];
-  for (let y = 4; y < 128; y += 9) {
-    for (let x = 2; x < 512; x += 6 + Math.random() * 3) {
-      g.fillStyle = cols[Math.floor(Math.random() * cols.length)];
-      g.globalAlpha = 0.5 + Math.random() * 0.5;
-      g.fillRect(x, y + Math.random() * 2, 4, 6);
-      g.fillStyle = '#d8a27a';
-      g.fillRect(x + 0.5, y - 2, 3, 3);
+// Fans: instanced bodies, heads and raised arms (three draw calls for the whole arena).
+// They bob in their seats and jump up with arms raised when the crowd gets loud (uHype).
+function buildCrowd(rows, homeTeam) {
+  const fans = [];
+  const d = new THREE.Object3D();
+  for (const r of rows) {
+    for (let a = -r.w / 2 + 1.2; a < r.w / 2 - 1; a += 2.1 + Math.random() * 0.5) {
+      if (Math.random() < 0.1) continue; // a few empty seats
+      d.position.set(r.x, 2.2 + r.i * 2.6, r.z);
+      d.rotation.set(0, r.ry, 0);
+      d.translateZ(-r.i * 3.2 + 0.2);
+      d.translateX(a);
+      d.rotateY((Math.random() - 0.5) * 0.4);
+      d.updateMatrix();
+      fans.push(d.matrix.clone());
     }
   }
-  g.globalAlpha = 1;
-  const t = new THREE.CanvasTexture(cv);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
+  const n = fans.length;
+  const SKIN = ['#f1c9a5', '#e0ac69', '#c68642', '#a0663a', '#8d5524', '#5c3a1e'];
+  const SHIRT = ['#ecf0f1', '#2c3e50', '#7f8c8d', '#c0392b', '#2980b9', '#16a085', '#f39c12', '#111111'];
+  const mkMat = () => {
+    const m = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+    m.onBeforeCompile = sh => {
+      sh.uniforms.uTime = crowdTime; sh.uniforms.uHype = crowdHype;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec2 aFan;\nuniform float uTime;\nuniform float uHype;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          float fanUp = (0.5 + 0.5 * sin(uTime * (2.0 + aFan.x * 2.0) + aFan.x * 40.0)) * (0.06 + uHype * 0.75);
+          transformed.y += fanUp;
+          #ifdef FAN_ARMS
+            transformed *= step(aFan.y, uHype);
+          #endif`);
+    };
+    return m;
+  };
+  // Per fan: bob phase/speed and how loud it has to get before they throw their arms up (shared by all parts)
+  const aFan = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) { aFan[i * 2] = Math.random(); aFan[i * 2 + 1] = 0.15 + Math.random() * 0.8; }
+  const make = (geo, arms) => {
+    const material = mkMat();
+    if (arms) material.defines = { FAN_ARMS: '' };
+    const im = new THREE.InstancedMesh(geo, material, n);
+    for (let i = 0; i < n; i++) im.setMatrixAt(i, fans[i]);
+    geo.setAttribute('aFan', new THREE.InstancedBufferAttribute(aFan, 2));
+    im.frustumCulled = false;
+    return im;
+  };
+  const bodyG = new THREE.CapsuleGeometry(0.62, 1.0, 1, 6); bodyG.translate(0, 0.95, 0); bodyG.scale(1, 1, 0.7);
+  const headG = new THREE.IcosahedronGeometry(0.42, 0); headG.translate(0, 2.35, 0.05);
+  const armG = new THREE.CapsuleGeometry(0.16, 1.2, 1, 4); armG.translate(0, 2.7, 0);
+  const armG2 = armG.clone(); armG.translate(-0.7, 0, 0); armG2.translate(0.7, 0, 0);
+  const armsG = mergeGeo([armG, armG2]);
+  const bodies = make(bodyG, false), heads = make(headG, false), arms = make(armsG, true);
+  const c = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const r = Math.random();
+    const shirt = r < 0.35 ? homeTeam.c1 : r < 0.5 ? homeTeam.c2 : SHIRT[Math.floor(Math.random() * SHIRT.length)];
+    bodies.setColorAt(i, c.set(shirt));
+    const sk = SKIN[Math.floor(Math.random() * SKIN.length)];
+    heads.setColorAt(i, c.set(sk)); arms.setColorAt(i, c.set(sk));
+  }
+  const group = new THREE.Group();
+  group.add(bodies, heads, arms);
+  return { group, count: n };
+}
+const crowdTime = { value: 0 }, crowdHype = { value: 0 };
+function mergeGeo(list) {
+  const pos = [], nor = [], idx = [];
+  let off = 0;
+  for (const g of list) {
+    pos.push(...g.attributes.position.array); nor.push(...g.attributes.normal.array);
+    for (const i of g.index.array) idx.push(i + off);
+    off += g.attributes.position.count;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  out.setIndex(idx);
+  return out;
 }
 
 // ---------------- Hoop ----------------
@@ -245,23 +304,24 @@ export class Renderer {
     const outer = new THREE.Mesh(new THREE.PlaneGeometry(400, 300), mat('#121318'));
     outer.rotation.x = -Math.PI / 2; outer.position.y = -0.02; s.add(outer);
 
-    // Stands
-    const crowd = crowdTexture();
-    const standMat = new THREE.MeshLambertMaterial({ map: crowd });
+    // Stands: stepped seating rows with fans sitting in them
+    const seatMat = mat('#20232c');
+    const seats = [];
     const mkStand = (w, x, z, ry) => {
       for (let i = 0; i < 7; i++) {
-        const t = crowd.clone(); t.needsUpdate = true; t.repeat.set(w / 30, 1); t.offset.x = Math.random();
-        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 2.2, 3), new THREE.MeshLambertMaterial({ map: t }));
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 2.2, 3), seatMat);
         m.position.set(x, 1.1 + i * 2.6, z);
         m.rotation.y = ry;
         m.translateZ(-i * 3.2);
         s.add(m);
+        seats.push({ w, x, z, ry, i });
       }
     };
     mkStand(130, 0, -36, 0);
     mkStand(80, -62, 0, Math.PI / 2);
     mkStand(80, 62, 0, -Math.PI / 2);
-    void standMat;
+    this.crowd = buildCrowd(seats, homeTeam);
+    s.add(this.crowd.group);
     // Courtside table + ad boards
     const board = new THREE.Mesh(new THREE.BoxGeometry(100, 2.2, 0.4), new THREE.MeshBasicMaterial({ color: homeTeam.c1 }));
     board.position.set(0, 1.1, -30.5); s.add(board);
@@ -389,6 +449,11 @@ export class Renderer {
         this.matchMark.position.set(mu.pos.x, mu.heightFt + 1.5 + mu.y + Math.sin(time * 4) * 0.15, mu.pos.z);
       }
     }
+
+    // Crowd: idle bob, on its feet after big plays
+    crowdTime.value = time;
+    this.hype = Math.max(0, (this.hype || 0) - dt * 0.45);
+    crowdHype.value = Math.min(1, this.hype);
 
     // Nets
     for (const h of this.hoops) {

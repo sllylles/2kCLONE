@@ -163,6 +163,25 @@ export const BUILDS = {
   athletic: { name: 'Athletic', desc: 'Balanced', mods: {}, width: 1 },
   strong: { name: 'Strong', desc: 'Stronger, slower', mods: { strength: 8, intD: 2, reb: 2, speed: -4, handle: -1 }, width: 1.1 },
 };
+// Attribute caps: the most an attribute can be upgraded to. Small players top out on handles, speed and
+// shooting; bigs on inside scoring, rebounding and rim protection. [cap at 6'0", cap at 7'3"]
+const CAP_RANGE = {
+  close: [84, 99], layup: [99, 86], dunk: [86, 97], mid: [99, 90], three: [99, 80], ft: [99, 88],
+  pass: [99, 76], handle: [99, 70], perD: [99, 76], intD: [68, 99], steal: [99, 74], block: [62, 99],
+  reb: [68, 99], speed: [99, 70], vert: [97, 84], strength: [72, 99], stamina: [99, 94],
+};
+// Builds trade caps: slim is quicker and a better shooter, strong owns the paint, athletic jumps out of the gym
+const BUILD_CAPS = {
+  slim: { speed: 3, handle: 3, perD: 3, three: 3, steal: 2, strength: -12, intD: -5, reb: -4, close: -3, block: -2, dunk: -3 },
+  athletic: { vert: 3, dunk: 3, speed: 1, three: -2, strength: -3, handle: -1 },
+  strong: { strength: 6, close: 4, intD: 4, reb: 4, block: 2, speed: -6, handle: -6, three: -5, perD: -4, vert: -4, steal: -3 },
+};
+export function attrCap(key, inches, build = 'athletic') {
+  const [lo, hi] = CAP_RANGE[key] || [99, 99];
+  const t = clamp((inches - 72) / 15, 0, 1);
+  return Math.round(clamp(lo + (hi - lo) * t + ((BUILD_CAPS[build] || {})[key] || 0), 60, 99));
+}
+
 // Per inch above (or below) the position's standard height.
 export const HEIGHT_MODS = { reb: 1.2, block: 1.2, intD: 1.0, close: 0.6, dunk: 0.3, speed: -1.2, handle: -1.0, three: -0.6, perD: -0.4 };
 // Standing reach (feet) with one arm straight overhead, to the grip of the hand. The 3D model is built to match.

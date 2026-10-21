@@ -274,6 +274,7 @@ export class PlayerModel {
 
     mergeStatic(this.body);
     this.pose = this.defaultPose();
+    this.pvel = {};
     this.runPhase = Math.random() * 6;
     this.handWorld = new THREE.Vector3();
     this.handWorldL = new THREE.Vector3();
@@ -361,7 +362,7 @@ export class PlayerModel {
   defaultPose() {
     return { crouch: 0.2, lean: 0.1, tilt: 0, twist: 0, headX: 0, headY: 0,
       sLx: 0.1, sLz: 0.12, eL: -0.3, sRx: 0.1, sRz: -0.12, eR: -0.3, wL: 0, wR: 0,
-      hLx: 0, hLz: 0.04, kL: 0.2, hRx: 0, hRz: -0.04, kR: 0.2, fL: 0, fR: 0, bob: 0, roll: 0 };
+      hLx: 0, hLz: 0.04, kL: 0.2, hRx: 0, hRz: -0.04, kR: 0.2, fL: 0, fR: 0, bob: 0, roll: 0, side: 0 };
   }
 
   // Build a target pose from the sim state, blend toward it, and apply. Returns how the ball is carried.
@@ -467,13 +468,19 @@ export class PlayerModel {
     let spin = 0;
     switch (act) {
       case 'shoot': {
-        const g = Math.min(1, k / 0.22);
+        // Load the ball above the head, dip, jump; the release (meter full) is at the top of the jump
+        const t = p.actionT || 0, ja = p.jumpAt || 0.2;
+        const tLoad = Math.min(0.2, ja * 0.6);
+        const g = ease(clamp01(t / tLoad));
+        const dip = ease(clamp01((t - tLoad * 0.4) / Math.max(0.05, ja - tLoad * 0.4)));
+        const up = clamp01((t - ja) / 0.12);
         const rel = p.released;
-        T.crouch = lerp(0.85, 0.1, clamp01((k - 0.12) / 0.25));
-        T.kL = T.kR = lerp(1.05, 0.1, clamp01((k - 0.12) / 0.25));
+        T.crouch = t < ja ? lerp(0.3, 0.95, dip) : lerp(0.95, 0.02, up);
+        T.kL = T.kR = t < ja ? lerp(0.35, 1.15, dip) : lerp(1.15, 0.08, up);
+        T.lean = t < ja ? 0.12 * dip : 0;
         T.hLx = T.hRx = 0; T.hLz = 0.06; T.hRz = -0.06;
         if (p.shotStyle === 'hook') {
-          T.sRz = lerp(-0.4, -2.95, ease(g)); T.sRx = -0.3; T.eR = -0.2;
+          T.sRz = lerp(-0.4, -2.95, g); T.sRx = -0.3; T.eR = -0.2;
           T.sLx = -0.7; T.sLz = 1.0; T.eL = -0.9;
           T.tilt = -0.25; T.hLx = -1.2; T.kL = 1.4; T.lean = 0;
           T.wR = rel ? 0.9 : -0.3;
@@ -481,7 +488,7 @@ export class PlayerModel {
         } else {
           // One-hand jumper: ball on the shooting hand at the set point (elbow under it, wrist cocked),
           // guide hand on the side. The arm extends through the release so the ball leaves the fingertips.
-          const set = ease(g);
+          const set = g;
           const ext = rel ? 1 : ease(clamp01(((p.meter || 0) - 0.7) / 0.3));
           const hi = p.shotStyle === 'fade' ? -0.2 : 0;
           T.sRx = lerp(-0.9, lerp(-1.95, -2.7 + hi, ext), set); T.sRz = -0.05;
@@ -493,7 +500,7 @@ export class PlayerModel {
             // Guide hand comes off the ball, shooting hand holds the gooseneck
             T.sLx = -1.9; T.sLz = 0.7; T.eL = -0.75; T.wL = 0.4;
           }
-          T.lean = -0.06; T.headX = -0.2;
+          T.lean = t < ja ? 0.1 * dip : -0.06; T.headX = -0.2;
           if (p.shotStyle === 'fade') {
             // Kobe/MJ fadeaway: lean back, lead knee up, release high
             const up = clamp01((k - 0.18) / 0.25);
@@ -560,9 +567,21 @@ export class PlayerModel {
             if (under) { T.sRx = 0.25; T.eR = -0.25; T.sRz = -0.1; T.sLx = -0.8; T.sLz = 0.9; T.lean = 0.25; ball = 'R'; }
             else { T.sLx = T.sRx = -3.1; T.eL = T.eR = -1.2; T.sLz = 0.2; T.sRz = -0.2; T.lean = -0.1; ball = 'over'; }
           } else if (st === 'contact') {
-            // Into the defender: ball hand high, off forearm braced, knee up
-            T.sRx = lerp(-1.6, -3.1, g); T.eR = -0.3; T.sLx = -1.25; T.sLz = 0.6; T.eL = -1.4;
-            T.hLx = -1.5; T.kL = 1.8; T.hRx = 0.2; T.kR = 0.5; T.lean = 0.2; ball = 'R';
+            const cv = p.contactVar || 0;
+            if (cv === 1) {
+              // Shoulder first: lead shoulder dropped into the chest, ball cocked high on the far side
+              T.twist = 0.5 * g; T.tilt = -0.18 * g; T.lean = 0.35;
+              T.sRx = lerp(-1.8, -3.2, g); T.eR = -0.7; T.sLx = -0.6; T.sLz = 0.3; T.eL = -1.9;
+              T.hLx = -1.2; T.kL = 1.6; T.hRx = -0.9; T.kR = 1.4; ball = 'R';
+            } else if (cv === 2) {
+              // Over the top: two hands cocked way back, legs split around the defender
+              T.sLx = T.sRx = lerp(-1.8, -3.6, g); T.eL = T.eR = -1.5; T.sLz = 0.3; T.sRz = -0.3;
+              T.hLx = -1.3; T.hRx = -1.1; T.hLz = 0.55; T.hRz = -0.55; T.kL = T.kR = 1.4; T.lean = 0.45; ball = 'over';
+            } else {
+              // Knee into the defender: ball hand high, off forearm braced
+              T.sRx = lerp(-1.6, -3.1, g); T.eR = -0.3; T.sLx = -1.25; T.sLz = 0.6; T.eL = -1.4;
+              T.hLx = -1.5; T.kL = 1.8; T.hRx = 0.2; T.kR = 0.5; T.lean = 0.2; ball = 'R';
+            }
           } else {
             T.sLx = T.sRx = lerp(-1.5, -3.15, g); T.eL = T.eR = lerp(-1.3, -1.55, g); T.sLz = 0.2; T.sRz = -0.2;
             T.hLx = -0.9; T.kL = 1.5; T.hRx = -0.5; T.kR = 1.3; ball = 'over';
@@ -717,8 +736,29 @@ export class PlayerModel {
         if (p.hasBall) ball = p.holding ? 'both' : 'dribble';
         break;
       }
-      case 'fall':
       case 'posterfall': {
+        const fv = p.fallVar || 0;
+        if (fv === 1) {
+          // Spun around and dropped on his side
+          const down = k < 0.7 ? ease(Math.min(1, k / 0.2)) : Math.max(0, 1 - (k - 0.7) / 0.3);
+          spin = (p.idx % 2 ? 1 : -1) * 1.4 * ease(Math.min(1, k / 0.25));
+          T.side = (p.idx % 2 ? 1 : -1) * 1.35 * down; T.roll = -0.35 * down;
+          T.crouch = 0.9 * down; T.kL = 1.4 * down + 0.2; T.kR = 0.6 * down + 0.2; T.hLx = -0.8 * down;
+          T.sLz = 1.2; T.sRz = -0.4; T.sLx = -0.5 * down; T.sRx = -1.2 * down; T.eL = -0.6; T.eR = -1.0;
+          break;
+        }
+        if (fv === 2) {
+          // Stagger back three steps, then flat on his back
+          const stag = clamp01(k / 0.3), down = k < 0.3 ? 0 : k < 0.72 ? ease(Math.min(1, (k - 0.3) / 0.12)) : Math.max(0, 1 - (k - 0.72) / 0.28);
+          const step = Math.sin(stag * Math.PI * 3) * (1 - down);
+          T.hLx = 0.5 * step - 0.6 * down; T.hRx = -0.5 * step - 0.3 * down; T.kL = 0.5 + 0.9 * down; T.kR = 0.5 + 0.6 * down;
+          T.lean = -0.35 * (1 - down); T.roll = -1.55 * down; T.crouch = 0.4 + 0.8 * down;
+          T.sLz = 1.0 + 0.4 * down; T.sRz = -1.0 - 0.4 * down; T.sLx = -0.8; T.sRx = -0.8; T.eL = T.eR = -0.5; T.headX = 0.3 * down;
+          break;
+        }
+      }
+      // falls through
+      case 'fall': {
         const big = act === 'posterfall';
         const downEnd = big ? 0.12 : 0.25;
         const upStart = big ? 0.72 : 0.6;
@@ -747,7 +787,13 @@ export class PlayerModel {
 
     // Blend; snappier while performing actions
     const kBlend = act ? (act === 'fall' || act === 'posterfall' ? 14 : act === 'shoot' || act === 'layup' ? 34 : 24) : 13;
-    for (const key in T) this.pose[key] = damp(this.pose[key], T[key], kBlend, dt);
+    // Critically damped spring per joint: eases into and out of every pose change (no velocity pops)
+    const w = kBlend * 1.35, e = Math.exp(-w * dt);
+    for (const key in T) {
+      const x0 = this.pose[key] - T[key], v0 = this.pvel[key] || 0, tmp = (v0 + w * x0) * dt;
+      this.pose[key] = T[key] + (x0 + tmp) * e;
+      this.pvel[key] = (v0 - w * tmp) * e;
+    }
     this.extraSpin = act && spin !== 0 ? spin : damp(this.extraSpin, 0, 20, dt);
     const P = this.pose;
 
@@ -761,7 +807,7 @@ export class PlayerModel {
     const air = clamp01(yJump / 0.8);
     const plant = (this.thigh + this.shin - Math.max(depth(hL, kL, P.hLz), depth(hR, kR, P.hRz))) * lerp(1, 0.45, runAmt) * (1 - air);
     this.body.position.y = yJump + P.bob - plant + this.yOff;
-    this.body.rotation.x = P.roll;
+    this.body.rotation.set(P.roll, 0, P.side);
     this.pelvis.position.y = this.legLen;
     this.torso.rotation.set(P.lean, P.twist, P.tilt);
     this.neck.rotation.set(P.headX - P.lean * 0.5, P.headY, 0);

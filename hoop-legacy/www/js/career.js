@@ -1,6 +1,6 @@
 // MyCareer state machine: showcase → draft → (G League) → NBA → playoffs → Finals.
 import { TEAMS, SHOWCASE_TEAMS, GLEAGUE_NICKS, POSITIONS, POS_ORDER, PLAYSTYLES, ATTRS, SKIN_TONES, HAIR, BUILDS, HEIGHT_MODS, BADGES, badgeTier, heightIn, HS_TEAMS, COLLEGES,
-  buildRatings, overall, randName, clamp, gradeLetter, upgradeCost } from './data.js';
+  buildRatings, overall, randName, clamp, gradeLetter, upgradeCost, attrCap } from './data.js';
 
 const SAVE_KEY = 'hoops.career.v1';
 const SETTINGS_KEY = 'hoops.settings.v1';
@@ -75,7 +75,10 @@ export function startingRatings(pos, style, rng = Math.random, inches = null, bu
   for (const k in HEIGHT_MODS) r[k] = clamp(Math.round(r[k] + HEIGHT_MODS[k] * dIn), 25, 99);
   const bm = (BUILDS[build] || BUILDS.athletic).mods;
   for (const k in bm) r[k] = clamp(r[k] + bm[k], 25, 99);
-  return tuneToOverall(r, pos, target);
+  const out = tuneToOverall(r, pos, target);
+  const inch = inches == null ? heightIn(POSITIONS[pos].height) : inches;
+  for (const k in out) out[k] = Math.min(out[k], attrCap(k, inch, build));
+  return out;
 }
 
 export function badgeTiers(c) {
@@ -194,7 +197,12 @@ export function faOffers(c) {
 }
 function boostTop(c, n, amt) {
   const r = c.player.ratings;
-  Object.keys(r).sort((a, b) => r[b] - r[a]).slice(0, n).forEach(k => { r[k] = Math.min(99, r[k] + amt); });
+  Object.keys(r).sort((a, b) => r[b] - r[a]).slice(0, n).forEach(k => { r[k] = Math.max(r[k], Math.min(capOf(c, k), r[k] + amt)); });
+}
+// This player's cap for an attribute (height + build)
+export function capOf(c, key) {
+  const P = c.player;
+  return attrCap(key, Math.round(P.heightFt * 12), P.build || 'athletic');
 }
 export function resignTeam(c) {
   c.ap += 15;
@@ -333,6 +341,9 @@ export function nextGame(c, settings) {
     if (n.rookieBoost > 0) { apMult = 1.5; tag = `Rookie Boost: 1.5× AP for ${n.rookieBoost} more game${n.rookieBoost > 1 ? 's' : ''}.`; }
     if (benchStart) tag = (tag ? tag + ' ' : '') + 'You come off the bench. Earn the coach\'s trust to start.';
   }
+  // Opponents keep up with you: once you outgrow your level they close most of the gap
+  const uo = userOverall(c);
+  if (uo > oppOvr + 4) oppOvr = Math.min(92, Math.round(oppOvr + (uo - oppOvr - 4) * 0.6));
   const seed = c.seed + c.season;
   const myRoster = generateRoster(myTeam.id, myOvr, seed);
   const oppRoster = generateRoster(opp.id, oppOvr, seed);
@@ -416,7 +427,7 @@ export function applyResult(c, info, res) {
     if (s.stl >= 2) picks.push('steal');
     if (s.blk >= 2) picks.push('block');
     if (!picks.length) picks.push(Object.keys(PLAYSTYLES[c.player.style].mods)[0]);
-    for (const k of picks.slice(0, 3)) { const n = gradeScore >= 80 ? 2 : 1; r[k] = Math.min(99, r[k] + n); out.boosts.push(`+${n} ${ATTRS.find(a => a.key === k).name}`); }
+    for (const k of picks.slice(0, 3)) { const n = gradeScore >= 80 ? 2 : 1; r[k] = Math.max(r[k], Math.min(capOf(c, k), r[k] + n)); out.boosts.push(`+${n} ${ATTRS.find(a => a.key === k).name}`); }
     const gain = Math.max(8, Math.round((gradeScore - 50) * 1.2 + s.pts * 0.8 + (win ? 6 : 0)));
     g.callUp = Math.min(100, g.callUp + gain);
     out.notes.push(`Call-up meter: ${g.callUp}%`);
@@ -585,7 +596,7 @@ export function simulateGame(c, info) {
 
 export function upgrade(c, key) {
   const v = c.player.ratings[key];
-  if (v >= 99) return false;
+  if (v >= capOf(c, key)) return false;
   const cost = upgradeCost(v);
   if (!maxed && c.ap < cost) return false;
   if (!maxed) c.ap -= cost;

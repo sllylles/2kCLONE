@@ -76,7 +76,11 @@ export class Game {
     this.badgeCounts = {};
     this.greenStreak = 0;
     this.inb = null;
+    // How hard the other team plays you: ramps up from 65 OVR to 90 OVR
+    this.heat = this.user ? clamp(((this.user.ovr || 60) - 65) / 25, 0, 1) : 0;
   }
+  // AI player on the team the user is playing against
+  isFoe(p) { return p && !p.isUser && this.user && p.team !== this.user.team; }
 
   // ---------- helpers ----------
   dir(team) { return team === 0 ? 1 : -1; }
@@ -112,11 +116,13 @@ export class Game {
   bc(p, key, n = 1) { if (p && p.isUser) this.badgeCounts[key] = (this.badgeCounts[key] || 0) + n; }
   isDown(p) { return p.action === 'fall' || p.action === 'posterfall'; }
   matchup(p) { return this.opp(p); }
-  knock(p, from, power, anim, dur) {
+  knock(p, from, power, anim, dur, force = false) {
     let dx = p.pos.x - from.x, dz = p.pos.z - from.z; const l = len(dx, dz) || 1;
     p.push.x += dx / l * power; p.push.z += dz / l * power;
     p.hitDir = { x: dx / l, z: dz / l };
-    if (p.y > 0.3 || ['layup', 'dunk', 'hang', 'shoot'].includes(p.action)) p.hitT = 0.45;
+    // Posterized defenders go down even if they were in the air
+    if (force && anim) { this.setAction(p, anim, dur); p.stun = Math.max(p.stun, dur * 0.8); }
+    else if (p.y > 0.3 || ['layup', 'dunk', 'hang', 'shoot'].includes(p.action)) p.hitT = 0.45;
     else if (anim) { this.setAction(p, anim, dur); p.stun = Math.max(p.stun, dur * 0.8); }
     this.emit('contact', { p, power });
   }
@@ -755,7 +761,10 @@ export class Game {
     p.meter = 0; p.ft = ft;
     p.shotSpeed = len(p.vel.x, p.vel.z);
     p.holding = false;
-    p.jumpAt = ft ? 0.22 : 0.14;
+    // Motion: load the ball above the head, dip, jump, release. Timed so the top of the jump is exactly
+    // where the meter fills (meter = 1), i.e. the green is at the top of the jump.
+    p.shotVy = ft ? 4 : (style === 'fade' ? 10.5 : 9) + p.r.vert * 0.03;
+    p.jumpAt = Math.max(ft ? 0.3 : 0.2, this.js.fill * (ft ? 1.1 : 1) - p.shotVy / G_PLAYER);
     // AI release timing
     if (!p.isUser) {
       const rating = this.shotRating(p);
@@ -809,11 +818,18 @@ export class Game {
     const diffMult = [1.5, 1.2, 1.0, 0.8][this.diff];
     let w = (0.05 + rating / 99 * 0.06) * this.js.window * diffMult * (this.opts.greenBoost || 1);
     if (p.action === 'layup') w *= 1.3;
-    if (!p.ft) w *= this.shotDifficulty(p);
+    if (!p.ft) w *= this.shotDifficulty(p) * this.greenRange(p);
     if (p.catchT && this.time - p.catchT < 1.6) w *= 1 + this.bt(p, 'catchShoot') * 0.08;
     if (p.shotStyle === 'fade' || p.shotStyle === 'hook') w *= 1 + this.bt(p, 'fadeAce') * 0.08;
     w *= 1 + this.bt(p, 'greenMachine') * 0.06 * Math.min(this.greenStreak, 3);
-    return Math.max(0.012, w);
+    if (p.isUser) w *= 1 - this.heat * 0.3;
+    return w > 0 ? Math.max(0.012, w) : 0;
+  }
+  // No greens from way downtown: the window closes over a few feet past the player's range
+  greenRange(p) {
+    if (p.action === 'layup') return 1;
+    const range = 27 + clamp((this.shotRating(p) - 70) / 29, 0, 1) * 4;
+    return clamp(1 - (this.distHoop(p) - range) / 4, 0, 1);
   }
 
   releaseJumper(p) {
@@ -824,11 +840,11 @@ export class Game {
     const w = p.isUser ? this.meterWindow(p) : (0.05 + rating / 99 * 0.06) * this.js.window;
     let q;
     const ae = Math.abs(err);
-    if (ae <= w) q = 'perfect';
-    if (p.isUser && !p.ft) { if (q === 'perfect') { this.greenStreak++; this.bc(p, 'greenMachine'); } else this.greenStreak = 0; }
-    else if (ae <= w * 2.4) q = 'good';
+    if (w > 0 && ae <= w) q = 'perfect';
+    else if (ae <= Math.max(w * 2.4, 0.1)) q = 'good';
     else if (ae <= 0.35) q = err < 0 ? 'early' : 'late';
     else q = err < 0 ? 'very early' : 'very late';
+    if (p.isUser && !p.ft) { if (q === 'perfect') { this.greenStreak++; this.bc(p, 'greenMachine'); } else this.greenStreak = 0; }
     if (p.isUser) this.emit('release', { q, err, w });
     this.resolveShot(p, p.ft ? 'ft' : 'jumper', q);
   }
@@ -848,7 +864,7 @@ export class Game {
   canDunk(p) { return p.r.dunk >= 55 && p.r.vert + p.r.strength * 0.4 >= 70; }
   // How far out a player can take off for a dunk on the move (feet from the rim)
   dunkRange(p) {
-    return 9.5 + clamp((p.r.dunk - 55) / 40, 0, 1) * 4 + clamp((p.r.vert - 55) / 40, 0, 1) * 3 + (p.heightFt - 6.5) * 0.8;
+    return 11.5 + clamp((p.r.dunk - 55) / 40, 0, 1) * 4 + clamp((p.r.vert - 55) / 40, 0, 1) * 3 + (p.heightFt - 6.5) * 0.8;
   }
   // Dunk jump: rise until the hand clears the rim, higher for bouncier players and flashy dunks
   dunkApex(p, flashy) {
@@ -866,8 +882,16 @@ export class Game {
     if (r >= 88) pool.push(['360', 1.5], ['btl', 1]);
     // Going at a defender near the rim: contact dunk
     const h = this.hoopOf(p.team);
-    const def = this.players.find(q => q.team !== p.team && !q.benched && len(q.pos.x - h.x, q.pos.z - h.z) < 7 && len(q.pos.x - p.pos.x, q.pos.z - p.pos.z) < 9);
-    if (def && r >= 65 && len(def.pos.x - p.pos.x, def.pos.z - p.pos.z) < 6 && chance(0.3)) return 'contact';
+    // A defender between the dunker and the rim, near the basket
+    const hx = h.x - p.pos.x, hz = h.z - p.pos.z, hl = len(hx, hz) || 1;
+    const def = this.players.find(q => {
+      if (q.team === p.team || q.benched || q.stun > 0) return false;
+      const qx = q.pos.x - p.pos.x, qz = q.pos.z - p.pos.z;
+      const along = (qx * hx + qz * hz) / hl, perp = Math.abs(qx * hz - qz * hx) / hl;
+      return len(q.pos.x - h.x, q.pos.z - h.z) < 8 && along > -1 && along < hl + 2 && perp < 4.5;
+    });
+    p.contactDef = null;
+    if (def && r >= 62 && chance(0.4 + (r - 62) / 80)) { p.contactVar = Math.floor(Math.random() * 3); p.contactDef = def; return 'contact'; }
     if (def) for (const e of pool) if (['windmill', '360', 'btl'].includes(e[0])) e[1] *= 0.2;
     let tot = pool.reduce((a, e) => a + e[1], 0), x = Math.random() * tot;
     for (const [k, w] of pool) { x -= w; if (x <= 0) return k; }
@@ -890,7 +914,8 @@ export class Game {
       p.extraHops = ['windmill', '360', 'btl'].includes(p.dunkStyle);
       // Long gathers from further out; release at the top of the jump with the hand over the rim
       const dh = len(p.pos.x - h.x, p.pos.z - h.z);
-      p.jumpAtF = clamp(0.2 + (dh - 4) * 0.022, 0.2, 0.42);
+      // Take off early on long approaches so the dunker flies in from further out
+      p.jumpAtF = clamp(0.18 + (dh - 4) * 0.012, 0.18, 0.3);
       p.dunkVy = Math.sqrt(2 * G_PLAYER * this.dunkApex(p, p.extraHops));
       p.releaseAt = p.jumpAtF + p.dunkVy / G_PLAYER * 0.97;
       this.setAction(p, 'dunk', p.releaseAt + 0.36);
@@ -912,6 +937,12 @@ export class Game {
         q.blockQueued = clamp(d / 30, 0.12, 0.42);
       }
     }
+    // Contact dunk: the defender steps up in front of the rim and rises to meet it, so they collide in the air
+    const cd = type === 'dunk' && p.dunkStyle === 'contact' ? p.contactDef : null;
+    if (cd && !cd.isUser && cd.stun <= 0) {
+      cd.meet = { x: h.x + dx / ll * 3.2, z: h.z + dz / ll * 3.2, until: this.time + p.releaseAt };
+      cd.blockQueued = Math.max(0.05, p.releaseAt - 0.32);
+    }
   }
 
   contestOf(p) {
@@ -932,6 +963,7 @@ export class Game {
       c += this.bt(q, 'clamps') * 0.04;
       if (c > best) { best = c; bestQ = q; }
     }
+    if (p.isUser && bestQ) best *= 1 + this.heat * 0.3;
     return { c: Math.min(1, best), q: bestQ };
   }
 
@@ -942,7 +974,9 @@ export class Game {
     const dh = this.distHoop(p);
     const three = kind === 'jumper' && this.is3(p.pos.x, p.pos.z, p.team);
     const pts = kind === 'ft' ? 1 : three ? 3 : 2;
-    const { c, q: contester } = kind === 'ft' ? { c: 0 } : this.contestOf(p);
+    const { c, q: nearest } = kind === 'ft' ? { c: 0 } : this.contestOf(p);
+    // A contact dunk goes at the defender who rose to meet it
+    const contester = kind === 'dunk' && p.dunkStyle === 'contact' && p.contactDef && !p.contactDef.benched ? p.contactDef : nearest;
     let prob;
     let c2 = c;
     if (p.shotStyle === 'hook') c2 = c * 0.65;
@@ -985,6 +1019,7 @@ export class Game {
       else prob *= tm;
     }
     if (!p.isUser && kind !== 'ft') prob *= [0.8, 0.92, 1.0, 1.08][this.diff];
+    if (this.isFoe(p) && kind !== 'ft') prob *= 1 + this.heat * 0.08;
     // Dimer: teammates shoot better right after the user's pass
     if (!p.isUser && p.lastPassFrom && p.lastPassFrom.isUser && this.time - p.catchT < 3) prob += this.bt(p.lastPassFrom, 'dimer') * 0.03;
     if (p.isUser && p.energy < 25) prob *= 0.9;
@@ -997,7 +1032,11 @@ export class Game {
     let poster = false;
     if (kind === 'dunk' && contester) {
       const d = len(contester.pos.x - p.pos.x, contester.pos.z - p.pos.z);
-      if (d < 5 && (contester.y > 0.3 || contester.action === 'block')) {
+      if (p.dunkStyle === 'contact' && d < 6.5) {
+        // Contact dunk: going through the defender. Made ones always put him on the floor.
+        const pp = clamp(0.35 + (p.r.dunk - contester.r.block) / 110 + (p.r.strength - contester.r.strength) / 160 + (p.r.vert - 50) / 300 + this.bt(p, 'posterizer') * 0.07, 0.25, 0.92);
+        if (make || chance(pp)) { poster = true; make = true; }
+      } else if (d < 5 && (contester.y > 0.3 || contester.action === 'block')) {
         const pp = clamp(0.14 + (p.r.dunk - contester.r.block) / 130 + (p.r.strength - contester.r.strength) / 200 + (p.r.vert - 50) / 300 + this.bt(p, 'posterizer') * 0.06, 0.1, 0.85);
         if (chance(pp)) { poster = true; make = true; }
       }
@@ -1015,7 +1054,8 @@ export class Game {
       if (chance(fp)) foul = contester;
     }
     if (poster) {
-      this.knock(contester, p.pos, 16, 'posterfall', 1.9);
+      contester.fallVar = Math.floor(Math.random() * 3);
+      this.knock(contester, p.pos, 16, 'posterfall', 1.9, true);
       this.emit('poster', { p, def: contester }); this.bc(p, 'posterizer', 2);
       if (p.isUser) this.addGrade(2, 'Posterized');
     } else if (foul) {
@@ -1211,7 +1251,7 @@ export class Game {
         if (q.team === h.team || q.isUser || q.stun > 0 || q.action) continue;
         const d = len(q.pos.x - h.pos.x, q.pos.z - h.pos.z);
         if (d < 4) {
-          const rate = 0.22 * (q.r.steal / 99) * [0.5, 0.8, 1, 1.3][this.diff] * (h.isUser ? 1 : 0.6);
+          const rate = 0.22 * (q.r.steal / 99) * [0.5, 0.8, 1, 1.3][this.diff] * (h.isUser ? 1 + this.heat * 0.6 : 0.6);
           if (chance(rate * dt)) {
             this.setAction(q, 'steal', 0.38);
             let pr = clamp(0.14 + (q.r.steal - h.r.handle) / 200, 0.04, 0.35);
@@ -1497,6 +1537,7 @@ export class Game {
     let gap;
     if (man.hasBall) gap = man.post ? 1.8 : hl > 30 ? 6 : hl < 27 && Math.max(man.r.three, man.r.mid) > 65 ? 2.9 : 3.4;
     else gap = 5 + Math.min(6, hl * 0.12);
+    if (man.hasBall && man.isUser) gap *= 1 - this.heat * 0.2;
     // Help defense: one defender steps into a driver's path
     if (this.helper === p && b.holder && b.holder.team !== p.team) {
       const hd = b.holder, dx = h.x - hd.pos.x, dz = h.z - hd.pos.z, dl = len(dx, dz) || 1;
@@ -1581,6 +1622,7 @@ export class Game {
           const hx = h.x - s.pos.x, hz = h.z - s.pos.z, hl = len(hx, hz) || 1;
           t = { x: s.pos.x + hx / hl * 3.0, z: s.pos.z + hz / hl * 3.0, sprint: true, face: s };
         }
+        if (p.meet && this.time < p.meet.until && !p.action) t = { x: p.meet.x, z: p.meet.z, sprint: true };
         if (p.chase && this.time < p.chase.until && !p.action) {
           const s = p.chase.target, h = this.hoopOf(s.team);
           const hx = h.x - s.pos.x, hz = h.z - s.pos.z, hl = len(hx, hz) || 1;
@@ -1684,8 +1726,7 @@ export class Game {
       p.meter += dt / (p.ft ? this.js.fill * 1.1 : this.js.fill);
       if (!p.jumped && p.actionT >= p.jumpAt) {
         p.jumped = true;
-        if (!p.ft) p.vy = (p.shotStyle === 'fade' ? 10.5 : 9) + p.r.vert * 0.03;
-        else p.vy = 4;
+        p.vy = p.shotVy || (p.ft ? 4 : 9 + p.r.vert * 0.03);
       }
       if (p.isUser) {
         if (input.shootReleased || !input.shootHeld || p.meter >= 1.45) this.releaseJumper(p);
@@ -1778,7 +1819,7 @@ export class Game {
       if (this.isBehind(q, shooter) && (shooter.action === 'layup' || shooter.action === 'dunk')) pb += 0.1;
       // Dunks are hard to block from the front: the ball is already over the rim
       else if (shooter.action === 'dunk') pb *= 0.5 - clamp((shooter.r.dunk - 60) / 200, 0, 0.2);
-      if (shooter.isUser) pb *= [0.5, 0.8, 1, 1.15][this.diff];
+      if (shooter.isUser) pb *= [0.5, 0.8, 1, 1.15][this.diff] * (1 + this.heat * 0.4);
       pb = clamp(pb, 0.02, q.isUser ? 0.45 : 0.3);
       if (chance(pb)) { this.blockShot(q, shooter); return true; }
     }
@@ -1876,7 +1917,7 @@ export class Game {
         const into = (hv.x * nx + hv.z * nz) * sgn;
         if (into > 0) { hv.x -= nx * sgn * into * 0.6; hv.z -= nz * sgn * into * 0.6; }
         // Hard drive into a set defender: contact, sometimes a charge
-        if (this.phase === 'live' && into > 12 && len(def.vel.x, def.vel.z) < 5 && def.y === 0 && !def.action && !handler.post
+        if (this.phase === 'live' && into > 12 && len(def.vel.x, def.vel.z) < 5 && def.y === 0 && !def.action && !handler.post && handler.action !== 'dunk'
           && this.time - (handler.contactT || -9) > 0.9) {
           handler.contactT = this.time;
           if (chance(0.09 + (def.r.intD - 60) / 400 + this.bt(def, 'brickWall') * 0.02)) { this.bc(def, 'brickWall', 2); this.charge(handler, def); return; }

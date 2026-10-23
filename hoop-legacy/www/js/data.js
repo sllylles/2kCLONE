@@ -50,6 +50,26 @@ export const DRIBBLE_STYLES = {
   flashy: { name: 'Flashy', desc: 'Spins and behind-the-backs. High risk, high reward.', cooldown: 0.36, burst: 1.15, ankle: 1.7, risk: 0.03 },
 };
 
+// Takeovers: fill the meter with good plays, and when it's full you take over for a stretch
+export const TAKEOVERS = {
+  shooting:   { name: 'Shooting', color: '#3ddc84', desc: 'Bigger green window, contests matter less, deeper range' },
+  finishing:  { name: 'Finishing', color: '#ff5a1f', desc: 'Finish through contact, harder to block, flashier dunks' },
+  playmaking: { name: 'Playmaking', color: '#36a3ff', desc: 'Ankle breakers, blow-bys and passes that can\'t be picked off' },
+  lockdown:   { name: 'Lockdown', color: '#b46bff', desc: 'Steals, blocks and tighter contests' },
+  glass:      { name: 'Glass', color: '#ffd23f', desc: 'Win the boards and box out anyone' },
+};
+const STYLE_TAKEOVER = { sharpshooter: 'shooting', slasher: 'finishing', post: 'finishing', playmaker: 'playmaking', lockdown: 'lockdown', twoway: 'lockdown', glass: 'glass' };
+// Your playstyle picks your takeover; everyone else gets the one that fits their best skill
+export function takeoverType(r, playstyle) {
+  if (playstyle && STYLE_TAKEOVER[playstyle]) return STYLE_TAKEOVER[playstyle];
+  const g = k => r[k] ?? 50;
+  const score = {
+    shooting: Math.max(g('three'), g('mid')), finishing: (g('dunk') + g('layup')) / 2 + 2,
+    playmaking: (g('pass') + g('handle')) / 2, lockdown: (g('perD') + g('steal')) / 2, glass: (g('reb') + g('block')) / 2,
+  };
+  return Object.keys(score).reduce((a, b) => (score[b] > score[a] ? b : a));
+}
+
 // Dunks that need extra hang time (and start the reach for the rim later)
 export const FLASHY_DUNKS = ['windmill', '360', 'btl', 'windmill2', '360wm', 'cradle'];
 // Dunks finished with one hand (the ball rides in the right palm)

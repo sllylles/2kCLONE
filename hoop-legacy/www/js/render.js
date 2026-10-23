@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { HOOP_X, RIM_Y, COURT_HALF_L, COURT_HALF_W } from './game.js';
 import { PlayerModel } from './player.js';
-import { ONE_HAND_DUNKS } from './data.js';
+import { ONE_HAND_DUNKS, TAKEOVERS } from './data.js';
 export { PlayerModel };
 
 const PX = 20; // canvas pixels per foot
@@ -387,6 +387,9 @@ export class Renderer {
       m.root.visible = !p.benched;
       const mode = m.update(p, game, dt, time);
       if (p.hasBall && mode) ballVis = { m, p, mode };
+      m.setTakeover(p.toOn && !p.benched ? TAKEOVERS[p.toType].color : null, dt, time);
+      // The building rocks while a home player is taking over
+      if (p.toOn && !p.benched && p.team === game.homeIdx) this.hype = Math.max(this.hype || 0, 0.5);
     }
     // Ball visual
     const bp = this.ball.position;

@@ -1,7 +1,7 @@
 // App shell: screens, MyCareer flow, game loop and HUD.
 import { ATTRS, POSITIONS, PLAYSTYLES, DRIBBLE_STYLES, JUMPSHOTS, SKIN_TONES, HAIR, TEAMS, POS_ORDER,
   buildRatings, overall, gradeLetter, gradeColor, upgradeCost, HEIGHT_RANGES, BUILDS, heightIn, fmtHeight,
-  BADGES, BADGE_TIERS, BADGE_COLORS, badgeTier } from './data.js';
+  BADGES, BADGE_TIERS, BADGE_COLORS, badgeTier, TAKEOVERS } from './data.js';
 import * as C from './career.js';
 import { Game } from './game.js';
 import { Renderer } from './render.js';
@@ -570,7 +570,7 @@ function startMatch(info) {
   game = new Game({
     teams: info.teams, rosters: info.rosters, userTeam: info.userTeam, userSlot: info.slot,
     qLen: settings.qLen, difficulty: settings.difficulty, benchStart: info.benchStart, boost: info.boost,
-    dribbleStyle: P.dribble, jumpshot: P.jumpshot, defAssist: settings.defAssist, passBias: info.passBias, badges: info.badges, greenBoost: info.greenBoost,
+    dribbleStyle: P.dribble, jumpshot: P.jumpshot, playstyle: P.style, defAssist: settings.defAssist, passBias: info.passBias, badges: info.badges, greenBoost: info.greenBoost,
     onEvent: onGameEvent,
   });
   game.homeIdx = info.teams.indexOf(info.homeTeam);
@@ -628,6 +628,7 @@ function showHelp(after) {
     <b>Post up</b><span>Push toward the rim to back down. SHOOT (or flick the stick toward SHOOT, hold, and let go) = turnaround fadeaway. Hold the stick toward the rim + SHOOT = hook. Flick for a drop step, ↓ to shimmy, double-tap to spin</span>
     <b>Off the ball</b><span>CALL BALL · ALLEY-OOP · CALL SCREEN (a teammate screens for you) · SET SCREEN (you screen for the ball handler)</span>
     <b>Defense</b><span>BLOCK/REBOUND · STEAL · hold BOX OUT when a shot goes up · hold the DEF ASSIST stick to stay on your man, slowly push it to the edge for intense D, or flick it toward BLOCK or STEAL to do those</span>
+    <b>Takeover</b><span>Buckets, greens, assists, stops, blocks, steals and boards fill your takeover meter (misses and turnovers drain it). Fill it to take over for a stretch: your playstyle picks Shooting, Finishing, Playmaking, Lockdown or Glass. Opposing stars can heat up too.</span>
     <b>Keyboard</b><span>WASD move · Shift sprint · Space shoot · K pass/box out · L lob/steal · O pick/screen · P post · Z def assist · X intense · Q/E/R/F/T moves</span>
   </div><div class="ov-btns"><button class="btn primary" id="ovOk">GOT IT</button></div></div>`);
   $('ovOk').onclick = () => after();
@@ -683,6 +684,15 @@ function onGameEvent(type, d) {
     case 'screenSet': if (d.for.isUser) callout('SCREEN SET, USE IT!', '#ffd23f'); break;
     case 'contact': sfx.thud(); if (d.power >= 4 && (d.p.isUser || d.p === game.matchup(game.user))) renderer.shake = Math.max(renderer.shake, 0.12); break;
     case 'poster': renderer.hype = 1.6; markPlay('poster', d.p, d.p.isUser || d.def.isUser ? 10 : 7, 'POSTERIZED!', true); toast(d.p.isUser ? 'POSTERIZED!' : d.def.isUser ? 'YOU GOT POSTERIZED' : 'POSTERIZED!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.6; if (d.p.isUser) vib(90); break;
+    case 'takeover': {
+      const nm = `#${d.p.num} ${d.p.name.split(' ').pop().toUpperCase()}`;
+      if (d.p.isUser) {
+        callout(`${d.info.name.toUpperCase()} TAKEOVER!`, d.info.color); toast('TAKEOVER', d.info.color);
+        sfx.cheer(1); vib(80); renderer.hype = Math.max(renderer.hype || 0, 1.4);
+      } else toast(d.p.team === game.userTeam ? `${nm} IS TAKING OVER` : `${nm} IS HEATING UP`, d.p.team === game.userTeam ? d.info.color : '#e5484d');
+      break;
+    }
+    case 'takeoverEnd': if (d.p.isUser) callout('TAKEOVER OVER', '#9aa3b2'); break;
     case 'charge': toast(d.def.isUser ? 'CHARGE TAKEN!' : 'CHARGE', d.def.team === game.userTeam ? '#3ddc84' : '#e5484d'); break;
     case 'ankle': renderer.hype = Math.max(renderer.hype || 0, 1.2); if (d.p.isUser) markPlay('ankle', d.p, 8, 'ANKLE BREAKER', true); toast('ANKLE BREAKER!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.35; vib(60); break;
     case 'beat': if (d.p.isUser) callout('BLOW-BY', '#ffd23f'); sfx.squeak(); break;
@@ -848,6 +858,12 @@ function updateHUD(dt) {
   $('huEnergy').style.width = u.energy + '%';
   $('huEnergy').style.background = u.energy < 25 ? 'var(--red)' : 'var(--green)';
   $('huStats').textContent = `${u.stats.pts} PTS · ${u.stats.reb} REB · ${u.stats.ast} AST`;
+  // Takeover meter
+  const to = TAKEOVERS[u.toType];
+  const toTxt = to.name.toUpperCase() + (u.toOn ? ' TAKEOVER' : '');
+  if (ui.toTxt !== toTxt) { $('huTOName').textContent = toTxt; $('huTO').classList.toggle('on', u.toOn); ui.toTxt = toTxt; }
+  $('huTOFill').style.width = (u.toMeter * 100).toFixed(1) + '%';
+  $('huTOFill').style.background = to.color;
   const mu = g.matchup(u);
   const mtxt = mu ? `${g.offense === u.team ? 'GUARDED BY' : 'GUARDING'} #${mu.num} ${mu.name.split(' ').pop().toUpperCase()}` : '';
   if (ui.mtxt !== mtxt) { $('huMatch').textContent = mtxt; ui.mtxt = mtxt; }

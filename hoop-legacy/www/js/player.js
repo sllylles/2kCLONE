@@ -45,6 +45,38 @@ function numberTexture(num, color, outline) {
   return t;
 }
 
+// White glow textures for the takeover aura (tinted by the material colour)
+const auraCache = {};
+function auraTex(kind) {
+  if (auraCache[kind]) return auraCache[kind];
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  if (kind === 'disc') {
+    const r = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    r.addColorStop(0, 'rgba(255,255,255,0.9)'); r.addColorStop(0.45, 'rgba(255,255,255,0.45)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = r; g.fillRect(0, 0, 128, 128);
+  } else if (kind === 'fade') {
+    // Alpha (read from green): solid in the middle, fading out at the feet and over the head
+    const lg = g.createLinearGradient(0, 0, 0, 128);
+    lg.addColorStop(0, '#000'); lg.addColorStop(0.35, '#fff'); lg.addColorStop(0.75, '#fff'); lg.addColorStop(1, '#000');
+    g.fillStyle = lg; g.fillRect(0, 0, 128, 128);
+  } else {
+    // Wispy vertical streaks (tiles seamlessly, scrolled upward)
+    for (let i = 0; i < 26; i++) {
+      const x = Math.random() * 128, w = 3 + Math.random() * 7, y = Math.random() * 128, h = 30 + Math.random() * 70;
+      const lg = g.createLinearGradient(0, 0, 0, h);
+      lg.addColorStop(0, 'rgba(255,255,255,0)'); lg.addColorStop(0.5, `rgba(255,255,255,${0.35 + Math.random() * 0.45})`); lg.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = lg;
+      for (const [ox, oy] of [[0, 0], [-128, 0], [0, -128], [-128, -128]]) { g.save(); g.translate(x + ox, y + oy); g.fillRect(0, 0, w, h); g.restore(); }
+    }
+  }
+  const t = new THREE.CanvasTexture(cv);
+  if (kind === 'heat') { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 1); }
+  auraCache[kind] = t;
+  return t;
+}
+
 const V2 = THREE.Vector2;
 const lathe = (pts, segs = 16) => new THREE.LatheGeometry(pts.map(([r, y]) => new V2(Math.max(0.001, r), y)), segs);
 
@@ -399,6 +431,7 @@ export class PlayerModel {
     this.blob = blob;
 
     mergeStatic(this.body);
+    this.toGlow = 0; this.toAura = null;
     this.pose = this.defaultPose();
     this.pvel = {};
     this.runPhase = Math.random() * 6;
@@ -611,6 +644,33 @@ export class PlayerModel {
       const top = mesh(new THREE.SphereGeometry(0.36, 16, 10, 0, Math.PI * 2, 0, 1.1), hairMat);
       top.position.set(0, 0.16, 0); top.scale.set(0.95, 0.9, 1.05); head.add(top);
     }
+  }
+
+  // Takeover aura: a glow on the floor and heat rising off the player, in the takeover's colour
+  setTakeover(color, dt, time) {
+    const want = color ? 1 : 0;
+    this.toGlow += (want - this.toGlow) * (1 - Math.exp(-4 * dt));
+    if (this.toGlow < 0.01 && !color) { if (this.toAura) this.toAura.visible = false; return; }
+    if (!this.toAura) {
+      const g = new THREE.Group();
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(2.6, 32), new THREE.MeshBasicMaterial({
+        map: auraTex('disc'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+      disc.rotation.x = -Math.PI / 2; disc.position.y = 0.06; g.add(disc);
+      const tex = auraTex('heat').clone(); tex.needsUpdate = true;
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.35, this.H * 1.15, 20, 1, true), new THREE.MeshBasicMaterial({
+        map: tex, alphaMap: auraTex('fade'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      col.position.y = this.H * 0.575; g.add(col);
+      this.root.add(g);
+      this.toAura = g; this.toDisc = disc; this.toCol = col;
+    }
+    if (color) { this.toDisc.material.color.set(color); this.toCol.material.color.set(color); }
+    this.toAura.visible = true;
+    const pulse = 0.8 + Math.sin(time * 6) * 0.2;
+    this.toDisc.material.opacity = 0.95 * this.toGlow * pulse;
+    this.toCol.material.opacity = 0.5 * this.toGlow;
+    this.toCol.material.map.offset.y = -time * 0.6; // heat rising
+    this.toCol.rotation.y = time * 0.4;
+    this.toAura.position.y = this.body.position.y - (this.pose.bob || 0);
   }
 
   defaultPose() {

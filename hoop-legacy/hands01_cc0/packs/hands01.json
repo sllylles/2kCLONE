@@ -1,0 +1,54 @@
+{
+    "jujube_knobby_knuckles": {
+        "author": "jujube",
+        "category": "",
+        "changed": "2015-12-14",
+        "created": "2015-12-14",
+        "description": "should probably be updated with knobby finger knuckles too",
+        "license": "CC0",
+        "original_author": "",
+        "original_source": "",
+        "source": "http://www.makehumancommunity.org/node/170",
+        "thumbnail": "jujube_knobby_knuckles.png",
+        "type": "target"
+    },
+    "mindfront_hand_fingers_correction": {
+        "author": "Mindfront",
+        "category": "",
+        "changed": "2018-08-31",
+        "created": "2018-08-31",
+        "description": "This target makes small morphs on the fingertips and the thumb. Better fit for my contributed finger nails. Ment to be used with subsurf on both the character and finger nails.",
+        "license": "CC0",
+        "original_author": "",
+        "original_source": "",
+        "source": "http://www.makehumancommunity.org/node/1590",
+        "thumbnail": "mindfront_hand_fingers_correction.png",
+        "type": "target"
+    },
+    "mindfront_hand_hypothenar": {
+        "author": "Mindfront",
+        "category": "",
+        "changed": "2018-08-31",
+        "created": "2018-08-31",
+        "description": "More noticeable hypothenar.",
+        "license": "CC0",
+        "original_author": "",
+        "original_source": "",
+        "source": "http://www.makehumancommunity.org/node/1591",
+        "thumbnail": "mindfront_hand_hypothenar.png",
+        "type": "target"
+    },
+    "mindfront_hand_thenar_eminence": {
+        "author": "Mindfront",
+        "category": "",
+        "changed": "2018-08-31",
+        "created": "2018-08-31",
+        "description": "More noticeable Thenar Eminence.",
+        "license": "CC0",
+        "original_author": "",
+        "original_source": "",
+        "source": "http://www.makehumancommunity.org/node/1592",
+        "thumbnail": "mindfront_hand_thenar_eminence.png",
+        "type": "target"
+    }
+}

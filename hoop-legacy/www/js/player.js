@@ -678,20 +678,24 @@ export class PlayerModel {
     }
     if (onD && !p.hasBall && !act && spd < 15) {
       // Defensive stance with slides
-      // Good defenders sit low and wide with busy hands; weak ones stand taller. Bigs keep their hands high.
-      const D = pa.D, hi = pa.defHigh;
-      T.crouch = lerp(0.5, 0.95, D); T.lean = lerp(0.18, 0.36, D); T.headX = -0.25; T.yaw = 0; T.side = 0; T.twist = 0; T.tilt = 0;
-      // Hands low and in front (about waist high, a little wider than the hips), not held out to the sides
-      T.sLz = lerp(0.3, 0.5, D); T.sRz = -T.sLz; T.sLx = -0.7; T.sRx = -0.6; T.eL = -0.95; T.eR = -0.9;
+      // Defensive stance (like Kawhi / Westbrook on the ball): feet wide, knees deep, hips sat back with the
+      // back fairly upright, arms spread out and angled down so the hands sit about waist high, one a touch
+      // wider and higher. Good defenders sit deeper and wider; weak ones stand taller with the arms in.
+      // Bigs hold one arm up instead.
+      const D = pa.D, hi = pa.defHigh, alt = p.idx % 2 === 0 ? 1 : -1;
+      T.crouch = lerp(0.6, 1.1, D); T.lean = lerp(0.2, 0.3, D); T.headX = -0.2; T.yaw = 0; T.side = 0; T.twist = 0; T.tilt = 0;
+      const wing = lerp(0.6, 0.95, D);
+      T.sLz = wing + (alt > 0 ? 0.15 : 0); T.sRz = -(wing + (alt < 0 ? 0.15 : 0));
+      T.sLx = alt > 0 ? -0.35 : -0.2; T.sRx = alt < 0 ? -0.35 : -0.2; T.eL = -0.35; T.eR = -0.35; T.wL = T.wR = 0.15;
       if (hi > 0.35) {
         // Bigs: one hand up to wall off shots and lobs, the other low and wide for the bounce pass
-        const up = -1.5 - 0.9 * hi, lowA = -0.3;
-        if (p.idx % 2 === 0) { T.sRx = up; T.sRz = -0.3; T.eR = -0.3; T.sLx = lowA; T.sLz = 0.5; T.eL = -0.5; }
-        else { T.sLx = up; T.sLz = 0.3; T.eL = -0.3; T.sRx = lowA; T.sRz = -0.5; T.eR = -0.5; }
+        const up = -1.5 - 0.9 * hi, lowA = -0.25;
+        if (alt > 0) { T.sRx = up; T.sRz = -0.3; T.eR = -0.3; T.sLx = lowA; T.sLz = 0.85; T.eL = -0.35; }
+        else { T.sLx = up; T.sLz = 0.3; T.eL = -0.3; T.sRx = lowA; T.sRz = -0.85; T.eR = -0.35; }
         T.crouch -= 0.1 * hi;
       }
-      const base = lerp(0.2, 0.34, D);
-      T.hLz = base; T.hRz = -base; T.kL = T.kR = lerp(0.6, 1.0, D); T.hLx = -0.25; T.hRx = -0.25;
+      const base = lerp(0.28, 0.45, D);
+      T.hLz = base; T.hRz = -base; T.kL = T.kR = lerp(0.8, 1.25, D); T.hLx = -0.35; T.hRx = -0.35;
       if (spd > 1.5 && Math.abs(fwd) < 0.6) {
         const sl = Math.sin(ph * 1.4);
         T.hLz = base + sl * 0.22; T.hRz = -base + sl * 0.22;
@@ -752,11 +756,18 @@ export class PlayerModel {
           else if (st === 'quick') T.bob = Math.abs(Math.sin(d * Math.PI * 2)) * 0.04 * low; // live, bouncy feet
           else { T.crouch += 0.06; T.lean += 0.05; }
         } else {
-          // On the move: chest over the ball, head up, shoulders turned a little to shield it; the off arm keeps pumping
-          T.crouch = Math.max(T.crouch, lerp(0.25, 0.6, low)); T.lean = Math.max(T.lean + 0.08, lerp(0.15, 0.42, low));
-          T.twist = T.twist * 0.5 + (domR ? 0.1 : -0.1); T.headX = -T.lean * 0.55;
-          if (domR) T.sLz += 0.18; else T.sRz -= 0.18;
-          T.kL = Math.max(T.kL, 0.4 + 0.2 * low); T.kR = Math.max(T.kR, 0.4 + 0.2 * low);
+          // Speed dribble, like a real handler at full speed: hips low and knees bent through the stride, chest
+          // well forward with the head up, the dribble arm reaching out and down in front so the ball stays at
+          // thigh height out ahead of the front foot, the off arm bent at 90 degrees and pumping back by the hip.
+          const r = runAmt, sa = Math.sin(ph - 0.25) * (domR ? 1 : -1);
+          T.crouch = Math.max(T.crouch, lerp(0.3, 0.5, low) * (0.6 + 0.4 * r) + 0.12);
+          T.kL += 0.28 * r; T.kR += 0.28 * r;
+          T.lean = (lerp(0.22, 0.5, low) * (0.5 + 0.5 * r) + 0.08);
+          T.headX = -T.lean * 0.8;
+          T.twist = T.twist * 0.4 + (domR ? 0.12 : -0.12);
+          const dpump = Math.cos(d * Math.PI * 2);
+          setArm(domR, -0.9 - 0.15 * dpump, 0.18 + pa.dribWide * 0.6, -0.45 - 0.2 * (1 + dpump) * 0.5);
+          setArm(!domR, 0.35 + sa * 0.35 * r, 0.22, -1.5);
         }
         ball = 'dribble';
       }

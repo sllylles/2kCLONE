@@ -397,14 +397,14 @@ export class Renderer {
       if (mode === 'dribble') {
         // Ball pounds between the dribble hand and the floor, pushed ahead when running
         const spd = Math.hypot(p.vel.x, p.vel.z);
-        const push = 0.45 + spd * 0.04;
         const d = p.dribblePhase;
-        const top = hand.y - 0.3;
         const f = Math.abs(Math.cos(d * Math.PI));
-        const lead = (1 - f) * spd * 0.05;
+        // Right under the palm at the top of the bounce, pushed out ahead (more at speed) where it hits the floor
+        const ahead = lerp(0.3 + spd * 0.03, 0.18, f);
+        const top = hand.y - 0.42;
         // Flashy / shifty handlers carry the ball out wider on the dribble-hand side
         const wide = (p.anim ? p.anim.dribWide : 0) * (p.dribbleHand === 'R' ? -1 : 1) * (1 - f * 0.5);
-        bp.set(hand.x + fx * (push + lead) + fz * wide, 0.42 + (top - 0.42) * f, hand.z + fz * (push + lead) - fx * wide);
+        bp.set(hand.x + fx * ahead + fz * wide, 0.42 + (top - 0.42) * f, hand.z + fz * ahead - fx * wide);
       } else if (mode === 'vmove') {
         // Crossover / between the legs / behind the back: V-shaped bounce from one hand to the other
         const k = Math.min(1, p.actionT / p.actionDur);

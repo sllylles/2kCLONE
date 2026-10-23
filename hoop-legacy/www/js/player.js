@@ -117,20 +117,33 @@ float uniCut(vec3 r) {
   }
   return min(0.565 - r.y, r.y - 0.315);
 }`;
-function uniformMat(c1, c2, kind) {
-  return packMat('uni|' + c1 + '|' + c2 + '|' + kind, () => {
+// Jersey numbers are painted in the same shader (projected front and back on the rest pose), so they
+// follow the cloth instead of floating flat cards that cut into the chest.
+function uniformMat(c1, c2, kind, num = null) {
+  return packMat('uni|' + c1 + '|' + c2 + '|' + kind + '|' + (num ?? ''), () => {
+    const ntex = num != null ? numberTexture(num, c2, shade(c1, 0.5)) : null;
     const m = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.82, side: THREE.DoubleSide });
     const u1 = { value: new THREE.Color(c1) }, u2 = { value: new THREE.Color(c2) }, uk = { value: kind };
+    const un = { value: ntex || null }, uon = { value: ntex ? 1 : 0 };
     m.onBeforeCompile = sh => {
-      sh.uniforms.uC1 = u1; sh.uniforms.uC2 = u2; sh.uniforms.uKind = uk;
+      sh.uniforms.uC1 = u1; sh.uniforms.uC2 = u2; sh.uniforms.uKind = uk; sh.uniforms.uNum = un; sh.uniforms.uNumOn = uon;
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 aRest;\nvarying vec3 vRest;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = aRest;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uC1;\nuniform vec3 uC2;\nuniform float uKind;\nvarying vec3 vRest;' + UNIFORM_GLSL)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uC1;\nuniform vec3 uC2;\nuniform float uKind;\nuniform sampler2D uNum;\nuniform float uNumOn;\nvarying vec3 vRest;' + UNIFORM_GLSL)
         .replace('#include <color_fragment>', `#include <color_fragment>
           float cut = uniCut(vRest);
           if (cut < 0.0) discard;
           float band = uKind < 0.5 ? 0.0095 : 0.013;
-          diffuseColor.rgb *= mix(uC2, uC1, smoothstep(band - 0.0012, band + 0.0012, cut));`);
+          diffuseColor.rgb *= mix(uC2, uC1, smoothstep(band - 0.0012, band + 0.0012, cut));
+          if (uNumOn > 0.5) {
+            bool front = vRest.z > 0.0;
+            float h = front ? 0.045 : 0.07;
+            vec2 nuv = vec2((front ? vRest.x : -vRest.x) / (2.0 * h) + 0.5, (vRest.y - (front ? 0.72 : 0.715)) / (2.0 * h) + 0.5);
+            if (nuv.x > 0.0 && nuv.x < 1.0 && nuv.y > 0.0 && nuv.y < 1.0) {
+              vec4 nc = texture2D(uNum, nuv);
+              diffuseColor.rgb = mix(diffuseColor.rgb, nc.rgb, nc.a);
+            }
+          }`);
     };
     m.customProgramCacheKey = () => 'uniform-cut';
     return m;
@@ -452,20 +465,14 @@ export class PlayerModel {
     const tint = new THREE.Color(Math.min(2.2, tone.r / mean.r), Math.min(2.2, tone.g / mean.g), Math.min(2.2, tone.b / mean.b));
     void lumT;
     skinned(P.geo.body, packMat('skin_' + sk + '|' + tint.getHexString(), () => new THREE.MeshStandardMaterial({ map: packTex(P.skins[sk].tex), color: tint, roughness: 0.62 })));
-    skinned(P.geo.jersey, uniformMat(jerseyC, trimC, 0));
+    skinned(P.geo.jersey, uniformMat(jerseyC, trimC, 0, p.num));
     skinned(P.geo.shorts, uniformMat(jerseyC, trimC, 1));
     const hair = p.hair === 'Locs' ? 'Fade' : p.hair; // Locs retired; old saves get a Fade
     const style = P.hair[hair];
     if (P.geo.eyes) skinned(P.geo.eyes, packMat('eyes', () => new THREE.MeshStandardMaterial({ map: packTex('eyes_brown.jpg'), roughness: 0.3 })));
     if (style) skinned(P.geo[style.mesh], packMat('hair_' + hair, () => new THREE.MeshStandardMaterial({ map: packTex(style.tex), color: '#5a5450', alphaTest: 0.6, side: THREE.DoubleSide, roughness: 0.85 })));
 
-    // Numbers on the chest and back, sneakers and socks, accessories
-    const ntex = numberTexture(p.num, trimC, shade(jerseyC, 0.5));
-    const nm = new THREE.MeshBasicMaterial({ map: ntex, transparent: true, depthWrite: false });
-    const back = mesh(new THREE.PlaneGeometry(0.17 * H * wk, 0.17 * H), nm);
-    back.position.set(0, 0.2 * H, -0.058 * H * wk); back.rotation.y = Math.PI; this.torso.add(back);
-    const front = mesh(new THREE.PlaneGeometry(0.1 * H * wk, 0.1 * H), nm);
-    front.position.set(0, 0.2 * H, 0.094 * H * wk); front.rotation.x = -0.12; this.torso.add(front);
+    // Sneakers and socks, accessories
     const shoeC = p.shoe || '#f2f2f2';
     const shoeMat = mat(shoeC, 0.45), soleMat = mat(lum(shoeC) > 0.5 ? '#2a2a2a' : '#f0f0f0', 0.8);
     const accent = mat(lum(shoeC) > 0.5 ? (lum(trimC) > 0.85 ? jerseyC : trimC) : '#ffffff', 0.5);
@@ -566,7 +573,7 @@ export class PlayerModel {
   defaultPose() {
     return { crouch: 0.2, lean: 0.1, tilt: 0, twist: 0, headX: 0, headY: 0,
       sLx: 0.1, sLz: 0.12, eL: -0.3, sRx: 0.1, sRz: -0.12, eR: -0.3, wL: 0, wR: 0,
-      hLx: 0, hLz: 0.04, kL: 0.2, hRx: 0, hRz: -0.04, kR: 0.2, fL: 0, fR: 0, bob: 0, roll: 0, side: 0, twL: 1.2, twR: 1.2 };
+      hLx: 0, hLz: 0.04, kL: 0.2, hRx: 0, hRz: -0.04, kR: 0.2, fL: 0, fR: 0, bob: 0, roll: 0, side: 0, yaw: 0, twL: 1.2, twR: 1.2 };
   }
 
   // Build a target pose from the sim state, blend toward it, and apply. Returns how the ball is carried.
@@ -584,37 +591,43 @@ export class PlayerModel {
     // Idle breathing
     T.bob = Math.sin(time * 2.2 + this.runPhase) * 0.02;
 
-    this.runPhase += dt * (3 + spd * 0.55);
+    this.runPhase += dt * (3 + spd * 0.38);
     const ph = this.runPhase;
     if (spd > 1.5) {
-      // Run cycle: thigh drives forward, swing knee folds high, toes push off behind,
-      // arms pump bent at the elbow against the legs, shoulders counter-rotate the hips
-      const A = 0.28 + runAmt * 0.78;
-      const s = Math.sin(ph);
+      // Run cycle, loose rather than robotic: the pelvis turns with the legs and the shoulders counter it,
+      // the hips sway and drop over the stance leg, knees drive and fold through the whole stride, arms
+      // swing from the shoulder and a little across the body, elbows open behind, and the head stays steady.
+      const A = 0.3 + runAmt * 0.78;
+      const s = Math.sin(ph), c = Math.cos(ph);
       T.hLx = -s * A; T.hRx = s * A;
-      T.kL = 0.22 + Math.max(0, Math.sin(ph + 1.25)) * A * 1.75;
-      T.kR = 0.22 + Math.max(0, -Math.sin(ph + 1.25)) * A * 1.75;
+      const fold = x => Math.pow(0.5 + 0.5 * x, 1.6);
+      T.kL = 0.18 + fold(Math.sin(ph + 1.25)) * A * 1.7;
+      T.kR = 0.18 + fold(-Math.sin(ph + 1.25)) * A * 1.7;
       T.fL = Math.max(0, -s) * 0.7 * A; T.fR = Math.max(0, s) * 0.7 * A;
-      T.sLx = s * A * 0.95; T.sRx = -s * A * 0.95;
-      T.sLz = 0.1; T.sRz = -0.1;
-      T.eL = -1.2 - runAmt * 0.35 + s * 0.25; T.eR = -1.2 - runAmt * 0.35 - s * 0.25;
-      T.wL = T.wR = -0.15;
-      T.lean = 0.1 + runAmt * 0.28;
-      T.bob = Math.abs(Math.cos(ph)) * 0.2 * A;
-      T.crouch = 0.22;
-      T.twist = -s * 0.16 * A;
-      T.tilt = Math.cos(ph) * 0.04 * A;
+      const sa = Math.sin(ph - 0.25); // arms trail the legs a touch
+      T.sLx = sa * A * 0.95; T.sRx = -sa * A * 0.95;
+      T.sLz = 0.1 + Math.max(0, -sa) * 0.16 * A; T.sRz = -0.1 - Math.max(0, sa) * 0.16 * A;
+      T.eL = -1.15 - runAmt * 0.35 + sa * 0.35; T.eR = -1.15 - runAmt * 0.35 - sa * 0.35;
+      T.wL = T.wR = -0.1 - Math.abs(sa) * 0.1;
+      T.lean = 0.08 + runAmt * 0.3;
+      T.bob = (Math.abs(c) * 0.24 - 0.06) * A;
+      T.crouch = 0.2 + runAmt * 0.06;
+      T.yaw = s * 0.17 * A; // pelvis turns with the swing leg
+      T.twist = -s * 0.36 * A; // shoulders counter-rotate (relative to the pelvis)
+      T.side = c * 0.045 * A; // hip drop over the stance leg
+      T.tilt = -c * 0.05 * A;
+      T.headY = -(T.yaw + T.twist) * 0.9; T.headX = -T.lean * 0.45;
     }
     // Off the ball and not busy: keep an eye on the ball
     if (!p.hasBall && !act && game.ball && game.ball.pos) {
       let rel = Math.atan2(game.ball.pos.x - p.pos.x, game.ball.pos.z - p.pos.z) - p.facing;
       while (rel > Math.PI) rel -= Math.PI * 2;
       while (rel < -Math.PI) rel += Math.PI * 2;
-      T.headY = Math.max(-0.85, Math.min(0.85, rel)) * 0.8;
+      T.headY += Math.max(-0.85, Math.min(0.85, rel)) * 0.8;
     }
     if (onD && !p.hasBall && !act && spd < 15) {
       // Defensive stance with slides
-      T.crouch = 0.8; T.lean = 0.32; T.headX = -0.25;
+      T.crouch = 0.8; T.lean = 0.32; T.headX = -0.25; T.yaw = 0; T.side = 0; T.twist = 0; T.tilt = 0;
       T.sLz = 0.95; T.sRz = -0.95; T.sLx = -0.6; T.sRx = -0.4; T.eL = -0.55; T.eR = -0.5;
       T.hLz = 0.3; T.hRz = -0.3; T.kL = 0.9; T.kR = 0.9; T.hLx = -0.25; T.hRx = -0.25;
       if (spd > 1.5 && Math.abs(fwd) < 0.6) {
@@ -643,7 +656,7 @@ export class PlayerModel {
     if (p.hasBall && !act) {
       if (p.holding || p.inbounding) {
         // Triple threat / inbound hold
-        T.sLx = -0.9; T.sRx = -0.9; T.eL = -1.35; T.eR = -1.35; T.sLz = 0.25; T.sRz = -0.25;
+        T.sLx = -0.3; T.sRx = -0.3; T.eL = -1.45; T.eR = -1.45; T.sLz = 0.2; T.sRz = -0.2;
         T.crouch = p.inbounding ? 0.3 : 0.6; T.kL = 0.65; T.kR = 0.65; T.lean = 0.2;
         if (p.inbounding) { T.sLx = T.sRx = -2.6; T.eL = T.eR = -0.9; }
         ball = p.inbounding ? 'over' : 'both';
@@ -706,11 +719,13 @@ export class PlayerModel {
             T.sLx = lerp(lerp(low, -1.85, drive), -2.15 + hi * 0.5, lift); T.sLz = lerp(0.3, 0.38, drive);
             T.eL = lerp(lerp(lowE, -1.1, drive), -1.15, lift); T.wL = -0.2;
           } else {
-            // Guide hand comes off the ball, shooting hand holds the gooseneck
-            T.sLx = -1.9; T.sLz = 0.7; T.eL = -0.75; T.wL = 0.4;
+            // Release: shooting arm locked out up and a little forward with the wrist snapped over
+            // (gooseneck); the guide hand comes off the side of the ball and stays up beside it, open.
+            T.sRx = -2.85 + hi; T.sRz = -0.04; T.eR = -0.04; T.wR = 1.25;
+            T.sLx = -2.55 + hi * 0.5; T.sLz = 0.22; T.eL = -0.3; T.wL = -0.15;
           }
           T.headX = lerp(0.15, -0.2, drive);
-          T.lean = t < ja ? 0.1 * dip : -0.06; T.headX = -0.2;
+          T.lean = t < ja ? 0.1 * dip : -0.06;
           if (p.shotStyle === 'fade') {
             // Kobe/MJ fadeaway: lean back, lead knee up, release high
             const up = clamp01((k - 0.18) / 0.25);
@@ -992,6 +1007,13 @@ export class PlayerModel {
     // Palms: facing the ball when it's in the hands or going up for it, relaxed toward the body otherwise
     const handsOn = (ball && ball !== 'dribble' && ball !== 'vmove') || ['shoot', 'layup', 'dunk', 'hang', 'block', 'rebound', 'pass', 'steal', 'celebrate', 'shotfollow'].includes(act);
     if (handsOn) { T.twL = 0; T.twR = 0; }
+    // Two-hand holds grip the ball from its sides: palms turned in to face each other
+    if (ball === 'both' || ball === 'over') { T.twL = 1.35; T.twR = 1.35; }
+    if (act === 'shoot' && p.shotStyle !== 'hook' && (ball === 'R' || p.released)) {
+      // Jumper: shooting palm faces away from the face (up and toward the rim) with the ball sitting in it;
+      // the guide hand's palm faces in, on the side of the ball and then off it
+      T.twR = Math.PI; T.twL = 1.3;
+    }
     // One-hand dunks: once the arm is up, the hand turns over to palm the ball from behind and on
     // top (palm toward the rim), then the wrist snaps it down through the rim.
     const sh1 = game && game.ball && game.ball.state === 'shot' && game.ball.shot;
@@ -1026,7 +1048,7 @@ export class PlayerModel {
     const air = clamp01(yJump / 0.8);
     const plant = (this.thigh + this.shin - Math.max(depth(hL, kL, P.hLz), depth(hR, kR, P.hRz))) * lerp(1, 0.45, runAmt) * (1 - air);
     this.body.position.y = yJump + P.bob - plant + this.yOff;
-    this.body.rotation.set(P.roll, 0, P.side);
+    this.body.rotation.set(P.roll, P.yaw, P.side);
     this.pelvis.position.y = this.legLen;
     this.torso.rotation.set(P.lean, P.twist, P.tilt);
     this.neck.rotation.set(P.headX - P.lean * 0.5, P.headY, 0);
@@ -1163,7 +1185,7 @@ export class PlayerModel {
   // (the poses are authored for a narrow rig, so on wide shoulders the hands drift apart).
   squeezeBall() {
     const gR = this.armR.grip.getWorldPosition(_v1), gL = this.armL.grip.getWorldPosition(_v2);
-    const sep = gR.distanceTo(gL), want = 0.7;
+    const sep = gR.distanceTo(gL), want = 0.8;
     if (sep <= want) return;
     const mid = _v3.addVectors(gR, gL).multiplyScalar(0.5), dir = _v4.subVectors(gR, gL).normalize();
     for (const [arm, sgn] of [[this.armR, 1], [this.armL, -1]]) {

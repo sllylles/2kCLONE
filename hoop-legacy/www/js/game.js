@@ -435,6 +435,7 @@ export class Game {
         this.startBlock(u, this.ball.state === 'loose' || this.ball.state === 'shot');
       }
       u.boxing = !!input.boxOut;
+      if (!u.boxing) u.boxTarget = null;
       u.defAssistHeld = !!(input.defAssist || input.boxOut);
       u.intenseD = !!input.intense;
     }
@@ -1519,12 +1520,20 @@ export class Game {
     return { x: w.x, z: w.z, sprint: far };
   }
 
+  // Box out whoever is closest (not just your matchup): get between them and the rim, back into them.
+  // The target sticks while the button is held unless someone else gets clearly closer.
   boxOutSpot(p) {
-    const man = this.matchup(p);
     const h = this.hoopOf(this.offense);
-    if (!man) return null;
+    const dist = q => len(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
+    const foes = this.players.filter(q => q.team !== p.team && !q.benched && !this.isDown(q));
+    if (!foes.length) return { x: p.pos.x, z: p.pos.z };
+    let man = foes.reduce((a, b) => (dist(b) < dist(a) ? b : a));
+    const cur = p.boxTarget && foes.includes(p.boxTarget) ? p.boxTarget : null;
+    if (cur && dist(cur) < dist(man) + 1.5) man = cur;
+    if (dist(man) > 14) { p.boxTarget = null; return { x: p.pos.x, z: p.pos.z }; } // nobody near: hold your ground
+    p.boxTarget = man;
     const hx = h.x - man.pos.x, hz = h.z - man.pos.z, hl = len(hx, hz) || 1;
-    return { x: man.pos.x + hx / hl * 1.9, z: man.pos.z + hz / hl * 1.9, sprint: true };
+    return { x: man.pos.x + hx / hl * 1.9, z: man.pos.z + hz / hl * 1.9, sprint: dist(man) > 4 };
   }
 
   defSpot(p) {
@@ -1632,7 +1641,7 @@ export class Game {
         let s = Math.min(ms * (t.sprint ? 1.25 : 1), d * 3.5);
         // Getting boxed out by the user
         const u = this.user;
-        if (u && u.boxing && this.matchup(u) === p && len(u.pos.x - p.pos.x, u.pos.z - p.pos.z) < 3.8) s *= 0.35;
+        if (u && u.boxing && u.boxTarget === p && len(u.pos.x - p.pos.x, u.pos.z - p.pos.z) < 3.8) s *= 0.35;
         if (d > 0.4) { desX = dx / d * s; desZ = dz / d * s; }
         p.faceTarget = t.face || null;
       }
@@ -1858,7 +1867,7 @@ export class Game {
     const shY = def.y + 0.78 * def.heightFt - 0.2, armL = (reachOf(def.heightFt) - (0.81 * def.heightFt - 0.2)) * 0.7;
     const ox = start.x - def.pos.x, oy = start.y - shY, oz = start.z - def.pos.z, ol = Math.hypot(ox, oy, oz) || 1;
     if (ol > armL) {
-      // Out of reach: the blocker closes the gap horizontally (bodies collide), the rest of the way the ball comes to him
+      // Out of reach: the blocker closes the gap horizontally (bodies collide), the rest of the way the ball comes to them
       const hz = Math.hypot(ox, oz) || 1;
       const close = Math.min(hz - 1.2, Math.max(0, ol - armL));
       if (close > 0) { def.pos.x += ox / hz * close; def.pos.z += oz / hz * close; }
@@ -2077,7 +2086,7 @@ export class Game {
         let tot = 0;
         const shootingTeam = this.offense;
         const u = this.user;
-        const boxed = u && u.boxing ? this.matchup(u) : null;
+        const boxed = u && u.boxing ? u.boxTarget : null;
         const w = cands.map(p => {
           let v = (p.r.reb + 20) * (p.team !== shootingTeam ? 1.4 : 1) * (p.isUser ? 1.2 : 1) * (b.stealer === p && b.stealT > 0 ? 6 : 1);
           if (p.boxing) v *= 1.8;

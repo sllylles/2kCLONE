@@ -503,6 +503,9 @@ export class Game {
     if (u.fadeReady && this.time - u.fadeReady < 0.8 && dh > 8) { this.startJumper(u, false, 'fade'); return; }
     const spd = len(u.vel.x, u.vel.z);
     const h = this.hoopOf(u.team);
+    // Stick pulled away from the rim as you shoot: fadeaway
+    const sm = input.move || { x: 0, z: 0 }, sml = len(sm.x, sm.z);
+    if (dh > 8 && sml > 0.5 && ((h.x - u.pos.x) * sm.x + (h.z - u.pos.z) * sm.z) / (dh * sml) < -0.6 && spd < 9) { this.startJumper(u, false, 'fade'); return; }
     const toward = ((h.x - u.pos.x) * u.vel.x + (h.z - u.pos.z) * u.vel.z) / (dh * Math.max(1, spd));
     const canDunk = this.canDunk(u);
     const dr = this.dunkRange(u);
@@ -751,6 +754,19 @@ export class Game {
   startJumper(p, ft = false, style = null, fromPost = false) {
     // The animation always outlasts the longest possible meter so the ball can't get stuck in the hands
     this.setAction(p, 'shoot', Math.max(1.15, this.js.fill * (ft ? 1.1 : 1) * 1.45 + 0.15));
+    // Shooting on the move: the shot comes out of how you're moving. Heading away from the rim is a running
+    // fadeaway, sideways is a drifting jumper (shoulders square, body carrying across), attacking is a pull-up.
+    const spd0 = len(p.vel.x, p.vel.z);
+    p.shotVel = null; p.driftSide = 0;
+    if (!ft && !fromPost && spd0 > 6 && (!style || style === 'fade')) {
+      const h = this.hoopOf(p.team), hx = h.x - p.pos.x, hz = h.z - p.pos.z, hl = len(hx, hz) || 1;
+      const along = (p.vel.x * hx + p.vel.z * hz) / (hl * spd0);
+      if (!style) style = along > 0.55 ? 'pullup' : along < -0.45 ? 'fade' : 'drift';
+      p.shotVel = { x: p.vel.x, z: p.vel.z };
+      // Which way the drift carries, from the shooter's point of view facing the rim (+1 = to their left)
+      const lat = (p.vel.x * (hz / hl) - p.vel.z * (hx / hl)) / spd0;
+      p.driftSide = Math.max(-1, Math.min(1, lat * Math.min(1, spd0 / 12)));
+    }
     p.shotStyle = style;
     p.turnaround = fromPost && style === 'fade';
     if (p.turnaround) {
@@ -794,7 +810,7 @@ export class Game {
 
   // How hard the shot is right now (1 = open and set, smaller = contested / deep / off the dribble).
   shotDifficulty(p) {
-    const c = this.contestOf(p).c * (p.shotStyle === 'fade' ? 0.6 : p.shotStyle === 'hook' ? 0.65 : 1);
+    const c = this.contestOf(p).c * (p.shotStyle === 'fade' ? 0.6 : p.shotStyle === 'hook' ? 0.65 : p.shotStyle === 'drift' ? 0.85 : 1);
     let f = 1 - 0.7 * c;
     const dh = this.distHoop(p);
     if (dh > 26) f *= Math.max(0.25, 1 - (dh - 26) * 0.12);
@@ -990,8 +1006,9 @@ export class Game {
     let c2 = c;
     if (p.shotStyle === 'hook') c2 = c * 0.65;
     if (p.shotStyle === 'fade') c2 = c * 0.6;
+    if (p.shotStyle === 'drift') c2 = c * 0.85;
     if (kind === 'jumper') c2 *= 1 - this.bt(p, 'deadeye') * 0.1;
-    const catchShot = !!(p.catchT && this.time - p.catchT < 1.6) && kind === 'jumper' && !p.shotStyle;
+    const catchShot = !!(p.catchT && this.time - p.catchT < 1.6) && kind === 'jumper' && (!p.shotStyle || p.shotStyle === 'pullup' || p.shotStyle === 'drift');
     if (kind === 'ft') prob = 0.3 + p.r.ft / 99 * 0.62;
     else if (kind === 'jumper' && p.shotStyle === 'hook') {
       const r = p.r.close * 0.75 + p.r.strength * 0.25;
@@ -1018,9 +1035,10 @@ export class Game {
       if (dh > 27) prob -= (dh - 27) * 0.045;
       if (p.shotSpeed > 12 && !(p.stepbackT && this.time - p.stepbackT < 0.7)) prob -= 0.08;
       if (p.shotStyle === 'fade') prob -= 0.03;
+      if (p.shotStyle === 'drift') prob -= 0.04 * (1 - p.r[three ? 'three' : 'mid'] / 140);
       prob *= 1 - 0.42 * c2;
       if (catchShot) prob += this.bt(p, 'catchShoot') * 0.03;
-      if (p.shotStyle) prob += this.bt(p, 'fadeAce') * 0.035;
+      if (p.shotStyle && p.shotStyle !== 'pullup') prob += this.bt(p, 'fadeAce') * 0.035;
     }
     if (kind !== 'dunk' && (kind !== 'layup' || p.meterOn)) {
       const tm = { perfect: -1, good: 1.12, early: 0.55, late: 0.55, 'very early': 0.1, 'very late': 0.1 }[quality];
@@ -1338,7 +1356,11 @@ export class Game {
     const passScore = best ? best.score + held * 0.025 : 0;
     const shootScore = est + (dd > 6 ? 0.05 : 0) + (p.catchT && this.time - p.catchT < 1.2 ? 0.03 : 0);
     const thresh = three ? 0.31 : 0.34;
-    if (dh < 28 && shootScore > thresh && shootScore >= passScore - 0.02 && chance(0.75)) { this.startJumper(p); return; }
+    if (dh < 28 && shootScore > thresh && shootScore >= passScore - 0.02 && chance(0.75)) {
+      // Good mid-range shooters fade away from a tight contest
+      const tight = dh > 9 && dh < 22 && this.contestOf(p).c > 0.45 && chance(clamp((p.r.mid - 65) / 60, 0, 0.45));
+      this.startJumper(p, false, tight ? 'fade' : null); return;
+    }
     // Drive if lane is open
     const lane = this.laneOpen(p, h);
     if (lane && dh < 30 && held > 0.4 && chance(0.25 + p.r.layup / 400 + p.r.speed / 500)) { p.driveT = rand(0.9, 1.6); return; }
@@ -1672,10 +1694,21 @@ export class Game {
           const s = Math.min(26, d / k);
           p.vel.x = d > 0.2 ? dx / d * s : 0; p.vel.z = d > 0.2 ? dz / d * s : 0;
         } else if (p.action === 'hang') { p.vel.x = p.vel.z = 0; }
-        else if (p.action === 'shoot' && p.shotStyle === 'fade' && !p.ft) {
-          const h = this.hoopOf(p.team), hx = p.pos.x - h.x, hz = p.pos.z - h.z, hl = len(hx, hz) || 1;
-          const f = Math.max(0, 1 - p.actionT * 1.5) * 6;
-          p.vel.x = hx / hl * f; p.vel.z = hz / hl * f;
+        else if (p.action === 'shoot' && !p.ft && (p.shotStyle === 'fade' || p.shotVel)) {
+          // Fades drift back off the defender; moving shots carry their momentum through the air
+          // (a pull-up mostly stops, a drift or a running fade keeps going until the landing)
+          let vx = 0, vz = 0;
+          if (p.shotStyle === 'fade') {
+            const h = this.hoopOf(p.team), hx = p.pos.x - h.x, hz = p.pos.z - h.z, hl = len(hx, hz) || 1;
+            const f = Math.max(0, 1 - p.actionT * 1.5) * 6;
+            vx = hx / hl * f; vz = hz / hl * f;
+          }
+          if (p.shotVel) {
+            const pull = p.shotStyle === 'pullup';
+            const keep = Math.max(0, 1 - p.actionT / (pull ? 0.4 : 0.95)) * (pull ? 0.35 : 0.6);
+            vx += p.shotVel.x * keep; vz += p.shotVel.z * keep;
+          }
+          p.vel.x = vx; p.vel.z = vz;
         }
         else { const dec = Math.exp(-6 * dt); p.vel.x *= dec; p.vel.z *= dec; }
       } else {
@@ -1729,7 +1762,10 @@ export class Game {
       // Dribble
       if (p.hasBall && !p.holding) {
         const prev = p.dribblePhase;
-        p.dribblePhase = (p.dribblePhase + dt * (p.post ? 2.0 : sp > 8 ? 2.3 : 1.9) * (p.anim ? p.anim.dribRate : 1)) % 1;
+        // Running: one bounce per stride (matches the run cycle in player.js); standing: the style's rhythm
+        const stride = (3 + sp * 0.38) * (p.anim ? p.anim.cadence : 1) / (Math.PI * 2);
+        const rate = sp > 6 ? stride * Math.min(1.12, Math.max(0.92, p.anim ? p.anim.dribRate : 1)) : (p.post ? 2.0 : 1.9) * (p.anim ? p.anim.dribRate : 1);
+        p.dribblePhase = (p.dribblePhase + dt * rate) % 1;
         if (prev < 0.5 && p.dribblePhase >= 0.5 && this.ball.state === 'held') this.emit('dribble', { p });
       }
     }

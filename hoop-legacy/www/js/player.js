@@ -152,19 +152,44 @@ function uniformMat(c1, c2, kind, num = null) {
   });
 }
 // Body skin, with crew socks painted on below the calf (on the rest pose), so the socks bend with the ankle
-// instead of a rigid tube the skin pokes through
-function skinMat(map, tint) {
+// instead of a rigid tube the skin pokes through. The fingers curl in the vertex shader (the rig has no finger
+// bones): `curl` (x = left hand, y = right hand, 0 = open, 1 = loose fist) relaxes hands that aren't on the ball.
+function skinMat(map, tint, curl) {
   const m = new THREE.MeshStandardMaterial({ map, color: tint, roughness: 0.62 });
   m.onBeforeCompile = sh => {
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vBindY;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBindY = position.y;');
+    sh.uniforms.uCurl = curl;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
+        varying float vBindY;
+        uniform vec2 uCurl;
+        vec3 rotA(vec3 v, vec3 k, float a) { float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c); }`)
+      .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+        // Finger curl about the knuckles and the middle joints, toward the palm (rest-pose hand frame)
+        vec3 curledPos = position;
+        {
+          float side = position.x > 0.0 ? 1.0 : -1.0;
+          vec3 W = vec3(0.281 * side, 0.603, 0.12), D = vec3(0.454 * side, -0.64, 0.62), N = vec3(-0.781 * side, -0.621, -0.069);
+          vec3 A = normalize(cross(D, N));
+          vec3 r = position - W;
+          float s = dot(r, D), lat = dot(r, A) * side;
+          float onHand = step(0.2, abs(position.x)) * (1.0 - smoothstep(0.11, 0.13, length(r)));
+          float a = (side > 0.0 ? uCurl.x : uCurl.y) * onHand * (1.0 - smoothstep(-0.03, -0.042, lat));
+          if (a > 0.001) {
+            float a1 = a * 1.25 * smoothstep(0.052, 0.064, s), a2 = a * 1.35 * smoothstep(0.072, 0.084, s);
+            vec3 K1 = W + D * 0.058;
+            vec3 K2 = K1 + rotA(D * 0.02, A, a1);
+            curledPos = K1 + rotA(position - K1, A, a1);
+            curledPos = K2 + rotA(curledPos - K2, A, a2);
+            objectNormal = rotA(rotA(objectNormal, A, a1), A, a2);
+          }
+        }`)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = curledPos;\nvBindY = position.y;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vBindY;')
       .replace('#include <map_fragment>', `#include <map_fragment>
         float sock = 1.0 - smoothstep(0.099, 0.101, vBindY);
         vec3 sockC = vec3(0.9) * (1.0 - 0.12 * (smoothstep(0.086, 0.088, vBindY) - smoothstep(0.092, 0.094, vBindY)));
         diffuseColor.rgb = mix(diffuseColor.rgb, sockC, sock);`);
   };
-  m.customProgramCacheKey = () => 'skin-socks';
+  m.customProgramCacheKey = () => 'skin-socks-curl';
   return m;
 }
 function packMat(key, make) {
@@ -482,7 +507,9 @@ export class PlayerModel {
     const mean = new THREE.Color().setRGB(...P.skins[sk].mean, THREE.SRGBColorSpace);
     const tint = new THREE.Color(Math.min(2.2, tone.r / mean.r), Math.min(2.2, tone.g / mean.g), Math.min(2.2, tone.b / mean.b));
     void lumT;
-    skinned(P.geo.body, packMat('skin_' + sk + '|' + tint.getHexString(), () => skinMat(packTex(P.skins[sk].tex), tint)));
+    // Own material per player (the program is shared) so each player's hands can curl on their own
+    this.curl = { value: new THREE.Vector2(0.5, 0.5) };
+    skinned(P.geo.body, skinMat(packTex(P.skins[sk].tex), tint, this.curl));
     skinned(P.geo.jersey, uniformMat(jerseyC, trimC, 0, p.num));
     skinned(P.geo.shorts, uniformMat(jerseyC, trimC, 1));
     const hair = p.hair === 'Locs' ? 'Fade' : p.hair; // Locs retired; old saves get a Fade
@@ -609,6 +636,12 @@ export class PlayerModel {
     T.bob = Math.sin(time * 2.2 + this.runPhase) * 0.02;
 
     this.runPhase += dt * (3 + spd * 0.38) * pa.cadence;
+    if (p.hasBall && !act && !p.holding && !p.post && spd > 6) {
+      // Speed dribble in rhythm with the stride: the ball hits the floor as the opposite foot lands
+      const want = p.dribblePhase * Math.PI * 2 - Math.PI / 2 + 0.3 + (p.dribbleHand === 'R' ? 0 : Math.PI);
+      let dd = want - this.runPhase; dd -= Math.round(dd / (Math.PI * 2)) * Math.PI * 2;
+      this.runPhase += dd * Math.min(1, dt * 8);
+    }
     const ph = this.runPhase;
     if (spd > 1.5) {
       // Run cycle, loose rather than robotic: the pelvis turns with the legs and the shoulders counter it,
@@ -620,14 +653,15 @@ export class PlayerModel {
       const fold = x => Math.pow(0.5 + 0.5 * x, 1.6);
       T.kL = 0.18 + fold(Math.sin(ph + 1.25)) * A * 1.7;
       T.kR = 0.18 + fold(-Math.sin(ph + 1.25)) * A * 1.7;
-      T.fL = Math.max(0, -s) * 0.7 * A; T.fR = Math.max(0, s) * 0.7 * A;
+      T.fL = Math.max(0, -s) * 0.9 * A; T.fR = Math.max(0, s) * 0.9 * A; // toes push off behind
       const sa = Math.sin(ph - 0.25); // arms trail the legs a touch
       T.sLx = sa * A * 0.95 * pa.pump; T.sRx = -sa * A * 0.95 * pa.pump;
       T.sLz = 0.1 + Math.max(0, -sa) * 0.16 * A; T.sRz = -0.1 - Math.max(0, sa) * 0.16 * A;
       T.eL = -1.15 - runAmt * 0.35 + sa * 0.35; T.eR = -1.15 - runAmt * 0.35 - sa * 0.35;
       T.wL = T.wR = -0.1 - Math.abs(sa) * 0.1;
       T.lean = 0.08 + runAmt * (0.3 + pa.guard * 0.06 - pa.big * 0.06);
-      T.bob = (Math.abs(c) * 0.24 - 0.06) * A * pa.heavy;
+      // Lowest over the planted foot (legs crossing), up in the air while the legs are split
+      T.bob = (Math.abs(s) * 0.3 - 0.1) * A * pa.heavy;
       T.crouch = 0.2 + runAmt * 0.06;
       T.yaw = s * 0.17 * A; // pelvis turns with the swing leg
       T.twist = -s * 0.36 * A; // shoulders counter-rotate (relative to the pelvis)
@@ -647,8 +681,15 @@ export class PlayerModel {
       // Good defenders sit low and wide with busy hands; weak ones stand taller. Bigs keep their hands high.
       const D = pa.D, hi = pa.defHigh;
       T.crouch = lerp(0.5, 0.95, D); T.lean = lerp(0.18, 0.36, D); T.headX = -0.25; T.yaw = 0; T.side = 0; T.twist = 0; T.tilt = 0;
-      T.sLz = lerp(0.6, 1.0, D); T.sRz = -T.sLz; T.sLx = -0.6; T.sRx = -0.4; T.eL = -0.55; T.eR = -0.5;
-      if (hi > 0.35) { T.sLx = T.sRx = -1.3 - 0.9 * hi; T.sLz = 0.75; T.sRz = -0.75; T.eL = T.eR = -0.35; T.crouch -= 0.15 * hi; }
+      // Hands low and in front (about waist high, a little wider than the hips), not held out to the sides
+      T.sLz = lerp(0.3, 0.5, D); T.sRz = -T.sLz; T.sLx = -0.7; T.sRx = -0.6; T.eL = -0.95; T.eR = -0.9;
+      if (hi > 0.35) {
+        // Bigs: one hand up to wall off shots and lobs, the other low and wide for the bounce pass
+        const up = -1.5 - 0.9 * hi, lowA = -0.3;
+        if (p.idx % 2 === 0) { T.sRx = up; T.sRz = -0.3; T.eR = -0.3; T.sLx = lowA; T.sLz = 0.5; T.eL = -0.5; }
+        else { T.sLx = up; T.sLz = 0.3; T.eL = -0.3; T.sRx = lowA; T.sRz = -0.5; T.eR = -0.5; }
+        T.crouch -= 0.1 * hi;
+      }
       const base = lerp(0.2, 0.34, D);
       T.hLz = base; T.hRz = -base; T.kL = T.kR = lerp(0.6, 1.0, D); T.hLx = -0.25; T.hRx = -0.25;
       if (spd > 1.5 && Math.abs(fwd) < 0.6) {
@@ -698,8 +739,8 @@ export class PlayerModel {
         const pump = Math.cos(d * Math.PI * 2) * (0.26 + 0.12 * low);
         setArm(domR, -0.5 + pump - runAmt * 0.3 + low * 0.12, 0.28 + pa.dribWide * 0.7, -0.65 - pump * 0.4 - low * 0.25);
         const sway = Math.sin(time * (st === 'shifty' ? 3.4 : 2.2) + p.idx);
-        if (st === 'power') setArm(!domR, -1.05, 0.5, -1.45); // off arm barred in front to shield
-        else if (st === 'flashy') setArm(!domR, -0.25 + sway * 0.15, 0.4, -0.45); // loose, swinging
+        if (st === 'power' && spd < 10) setArm(!domR, -0.5, 0.5, -1.0); // off arm barred low in front to shield
+        else if (st === 'flashy' && spd < 10) setArm(!domR, -0.25 + sway * 0.15, 0.4, -0.45); // loose, swinging
         else if (still) setArm(!domR, -0.8, 0.4, -1.05); // off hand up in front, protecting
         if (still) {
           T.crouch = lerp(0.3, 1.0, low); T.kL = T.kR = lerp(0.35, 1.1, low);
@@ -711,7 +752,10 @@ export class PlayerModel {
           else if (st === 'quick') T.bob = Math.abs(Math.sin(d * Math.PI * 2)) * 0.04 * low; // live, bouncy feet
           else { T.crouch += 0.06; T.lean += 0.05; }
         } else {
-          T.crouch = Math.max(T.crouch, lerp(0.25, 0.6, low)); T.lean = Math.max(T.lean, lerp(0.15, 0.38, low));
+          // On the move: chest over the ball, head up, shoulders turned a little to shield it; the off arm keeps pumping
+          T.crouch = Math.max(T.crouch, lerp(0.25, 0.6, low)); T.lean = Math.max(T.lean + 0.08, lerp(0.15, 0.42, low));
+          T.twist = T.twist * 0.5 + (domR ? 0.1 : -0.1); T.headX = -T.lean * 0.55;
+          if (domR) T.sLz += 0.18; else T.sRz -= 0.18;
           T.kL = Math.max(T.kL, 0.4 + 0.2 * low); T.kR = Math.max(T.kR, 0.4 + 0.2 * low);
         }
         ball = 'dribble';
@@ -769,9 +813,20 @@ export class PlayerModel {
           }
           T.headX = lerp(0.15, -0.2, drive);
           T.lean = t < ja ? 0.1 * dip : -0.06;
+          if (p.shotStyle === 'drift') {
+            // Drifting jumper: shoulders stay square to the rim while the legs swing out toward the drift
+            const up = clamp01((t - ja + 0.03) / 0.15), ds = p.driftSide || 0;
+            T.hLz = 0.06 + ds * 0.32 * up; T.hRz = -0.06 + ds * 0.32 * up;
+            T.tilt = -ds * 0.1 * up; T.kL = lerp(T.kL, 0.5, up); T.kR = lerp(T.kR, 0.4, up); T.lean = t < ja ? 0.1 * dip : 0.03;
+          } else if (p.shotStyle === 'pullup') {
+            // Pull-up: hard stop with the chest carried forward, legs a touch out in front on the way up
+            const up = clamp01((t - ja + 0.03) / 0.15);
+            T.lean = t < ja ? 0.08 + 0.18 * dip : 0.1 * (1 - up);
+            T.hLx = T.hRx = -0.3 * up; T.kL = Math.max(T.kL, 0.4 * up); T.kR = Math.max(T.kR, 0.4 * up);
+          }
           if (p.shotStyle === 'fade') {
-            // Kobe/MJ fadeaway: lean back, lead knee up, release high
-            const up = clamp01((k - 0.18) / 0.25);
+            // Kobe/MJ fadeaway (also off a backpedal): lean back, lead knee up, release high
+            const up = clamp01((t - ja + 0.05) / 0.2);
             T.lean = -0.5 * up; T.hLx = -1.15 * up; T.kL = 0.3 + 1.1 * up; T.hRx = 0.25 * up; T.kR = 0.15; T.headX = -0.15 * up;
             if (p.turnaround) spin = (p.turnSide || 1) * Math.PI * (1 - ease(clamp01(k / 0.28)));
           }
@@ -1156,6 +1211,20 @@ export class PlayerModel {
     this.armL.hand.getWorldPosition(this.handWorldL);
     this.armR.palmBall.getWorldPosition(this.ballWorld);
     this.armL.palmBall.getWorldPosition(this.ballWorldL);
+    if (this.curl) {
+      // Hands: open on the ball and when reaching for it, a loose relaxed curl otherwise, gripping the rim on a hang
+      let cl = 0.6, cr = 0.6;
+      if (ball === 'both' || ball === 'over' || ball === 'vmove') cl = cr = 0.02;
+      else if (ball === 'R') { cr = 0.02; cl = act === 'shoot' ? 0.08 : 0.4; }
+      else if (ball === 'dribble') { if (domR) { cr = 0.08; cl = 0.35; } else { cl = 0.08; cr = 0.35; } }
+      if (['block', 'rebound', 'steal', 'pass', 'shotfollow'].includes(act)) cl = cr = 0.04;
+      else if (act === 'shoot' && p.released) { cr = 0.3; cl = 0.06; }
+      else if (act === 'hang') cl = cr = 0.75;
+      else if (onD && !act && !p.hasBall) cl = cr = 0.15;
+      const kc = 1 - Math.exp(-14 * dt);
+      this.curl.value.x += (cl - this.curl.value.x) * kc;
+      this.curl.value.y += (cr - this.curl.value.y) * kc;
+    }
     // Two-hand hold: the ball sits between the grips, pushed out along the palms just far enough
     // that its surface touches both hands.
     const gR = this.armR.grip.getWorldPosition(_v1), gL = this.armL.grip.getWorldPosition(_v2);

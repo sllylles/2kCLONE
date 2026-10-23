@@ -1857,7 +1857,14 @@ export class Game {
     // The swat happens where the blocker's hand meets the ball: pull the ball to within the blocker's reach
     const shY = def.y + 0.78 * def.heightFt - 0.2, armL = (reachOf(def.heightFt) - (0.81 * def.heightFt - 0.2)) * 0.7;
     const ox = start.x - def.pos.x, oy = start.y - shY, oz = start.z - def.pos.z, ol = Math.hypot(ox, oy, oz) || 1;
-    if (ol > armL) { const f = armL / ol; start.x = def.pos.x + ox * f; start.y = shY + oy * f; start.z = def.pos.z + oz * f; }
+    if (ol > armL) {
+      // Out of reach: the blocker closes the gap horizontally (bodies collide), the rest of the way the ball comes to him
+      const hz = Math.hypot(ox, oz) || 1;
+      const close = Math.min(hz - 1.2, Math.max(0, ol - armL));
+      if (close > 0) { def.pos.x += ox / hz * close; def.pos.z += oz / hz * close; }
+      const rx = start.x - def.pos.x, rz = start.z - def.pos.z, rl = Math.hypot(rx, oy, rz) || 1;
+      if (rl > armL) { const f = armL / rl; start.x = def.pos.x + rx * f; start.y = shY + oy * f; start.z = def.pos.z + rz * f; }
+    }
     b.pos = start;
     b.vis = { ...start };
     const dx = shooter.pos.x - def.pos.x, dz = shooter.pos.z - def.pos.z, l = len(dx, dz) || 1;

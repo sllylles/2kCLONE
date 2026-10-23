@@ -1,0 +1,272 @@
+{
+ "bones": [
+  "pelvis",
+  "torso",
+  "head",
+  "shL",
+  "elL",
+  "wrL",
+  "shR",
+  "elR",
+  "wrR",
+  "hpL",
+  "knL",
+  "anL",
+  "hpR",
+  "knR",
+  "anR"
+ ],
+ "joints": {
+  "pelvis": [
+   0,
+   0.53,
+   0.01
+  ],
+  "spine": [
+   0,
+   0.66,
+   0.02
+  ],
+  "neck": [
+   0,
+   0.855,
+   0.01
+  ],
+  "crown": [
+   0,
+   0.97,
+   0.04
+  ],
+  "hip": [
+   0.055,
+   0.5,
+   0.0
+  ],
+  "knee": [
+   0.09,
+   0.28,
+   0.02
+  ],
+  "ankle": [
+   0.112,
+   0.045,
+   0.01
+  ],
+  "toe": [
+   0.12,
+   0.01,
+   0.12
+  ],
+  "shoulder": [
+   0.115,
+   0.8,
+   0.005
+  ],
+  "elbow": [
+   0.215,
+   0.678,
+   0.038
+  ],
+  "wrist": [
+   0.281,
+   0.603,
+   0.12
+  ],
+  "tip": [
+   0.325,
+   0.541,
+   0.18
+  ]
+ },
+ "meshes": {
+  "body": {
+   "count": 13259,
+   "index": 67482,
+   "groups": [
+    {
+     "start": 0,
+     "count": 67482,
+     "mat": 0
+    }
+   ],
+   "pos": 0,
+   "nor": 159108,
+   "uv": 198888,
+   "si": 251924,
+   "sw": 304960,
+   "idx": 357996,
+   "rest": null
+  },
+  "jersey": {
+   "count": 1440,
+   "index": 7938,
+   "groups": [
+    {
+     "start": 0,
+     "count": 7938,
+     "mat": 0
+    }
+   ],
+   "pos": 492960,
+   "nor": 510240,
+   "uv": 514560,
+   "si": 520320,
+   "sw": 526080,
+   "idx": 531840,
+   "rest": 547716
+  },
+  "shorts": {
+   "count": 962,
+   "index": 5484,
+   "groups": [
+    {
+     "start": 0,
+     "count": 5484,
+     "mat": 0
+    }
+   ],
+   "pos": 564996,
+   "nor": 576540,
+   "uv": 579428,
+   "si": 583276,
+   "sw": 587124,
+   "idx": 590972,
+   "rest": 601940
+  },
+  "hair_Buzz": {
+   "count": 2061,
+   "index": 10032,
+   "groups": [
+    {
+     "start": 0,
+     "count": 10032,
+     "mat": 0
+    }
+   ],
+   "pos": 613484,
+   "nor": 638216,
+   "uv": 644400,
+   "si": 652644,
+   "sw": 660888,
+   "idx": 669132,
+   "rest": null
+  },
+  "hair_Fade": {
+   "count": 3177,
+   "index": 11034,
+   "groups": [
+    {
+     "start": 0,
+     "count": 11034,
+     "mat": 0
+    }
+   ],
+   "pos": 689196,
+   "nor": 727320,
+   "uv": 736852,
+   "si": 749560,
+   "sw": 762268,
+   "idx": 774976,
+   "rest": null
+  },
+  "hair_Afro": {
+   "count": 2276,
+   "index": 6576,
+   "groups": [
+    {
+     "start": 0,
+     "count": 6576,
+     "mat": 0
+    }
+   ],
+   "pos": 797044,
+   "nor": 824356,
+   "uv": 831184,
+   "si": 840288,
+   "sw": 849392,
+   "idx": 858496,
+   "rest": null
+  },
+  "hair_Swoop": {
+   "count": 991,
+   "index": 3150,
+   "groups": [
+    {
+     "start": 0,
+     "count": 3150,
+     "mat": 0
+    }
+   ],
+   "pos": 871648,
+   "nor": 883540,
+   "uv": 886516,
+   "si": 890480,
+   "sw": 894444,
+   "idx": 898408,
+   "rest": null
+  },
+  "eyes": {
+   "count": 96,
+   "index": 516,
+   "groups": [
+    {
+     "start": 0,
+     "count": 516,
+     "mat": 0
+    }
+   ],
+   "pos": 904708,
+   "nor": 905860,
+   "uv": 906148,
+   "si": 906532,
+   "sw": 906916,
+   "idx": 907300,
+   "rest": null
+  }
+ },
+ "hair": {
+  "Buzz": {
+   "mesh": "hair_Buzz",
+   "tex": "hair_short02.png"
+  },
+  "Fade": {
+   "mesh": "hair_Fade",
+   "tex": "hair_short01.png"
+  },
+  "Afro": {
+   "mesh": "hair_Afro",
+   "tex": "hair_afro01.png"
+  },
+  "Swoop": {
+   "mesh": "hair_Swoop",
+   "tex": "hair_short04.png"
+  }
+ },
+ "skins": {
+  "light": {
+   "tex": "skin_light.jpg",
+   "mean": [
+    0.8753,
+    0.6589,
+    0.5347
+   ]
+  },
+  "tan": {
+   "tex": "skin_tan.jpg",
+   "mean": [
+    0.7794,
+    0.6075,
+    0.5062
+   ]
+  },
+  "dark": {
+   "tex": "skin_dark.jpg",
+   "mean": [
+    0.365,
+    0.2336,
+    0.1668
+   ]
+  }
+ },
+ "source": "MakeHuman system assets (CC0)"
+}

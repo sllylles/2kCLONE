@@ -5,6 +5,7 @@ import { ATTRS, POSITIONS, PLAYSTYLES, DRIBBLE_STYLES, JUMPSHOTS, SKIN_TONES, HA
 import * as C from './career.js';
 import { Game } from './game.js';
 import { Renderer } from './render.js';
+import { loadPlayerPack } from './player.js';
 import { Controls } from './controls.js';
 import { sfx, unlock, setMuted, startCrowd, stopCrowd } from './audio.js';
 import { Recorder, ReplayPlayer } from './replay.js';
@@ -12,6 +13,8 @@ import { Recorder, ReplayPlayer } from './replay.js';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
+// MakeHuman player models; matches started before this finishes use the procedural players
+loadPlayerPack();
 let settings = C.loadSettings();
 C.setMaxed(settings.maxed);
 const apText = c => C.isMaxed() ? '∞ AP' : `${c.ap} AP`;

@@ -8,6 +8,8 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const ease = t => t * t * (3 - 2 * t);
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
 const MOVE_SWITCH = { cross: 1, behind: 1, btl: 1 };
 const TWO_HAND = { two: 1, cockback: 1, clutch: 1, '360': 1, reverse: 1, btl: 1 };
 function wrapLerp(a, b, t) {
@@ -92,10 +94,82 @@ function mesh(geo, material, shadow = false) {
   return m;
 }
 
+// ---- MakeHuman player pack (www/models), loaded once at startup; the procedural body is the fallback ----
+let PACK = null;
+const packCache = new Map();
+function packTex(file) {
+  if (!packCache.has(file)) {
+    const t = new THREE.TextureLoader().load(PACK.base + file);
+    t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    packCache.set(file, t);
+  }
+  return packCache.get(file);
+}
+// Jersey/shorts: the cut (arm holes, V-neck, hems) is evaluated per pixel on the rest-pose position so the
+// edges are smooth curves, with the trim colour in a band along them
+const UNIFORM_GLSL = `
+float uniCut(vec3 r) {
+  if (uKind < 0.5) {
+    float ax = abs(r.x);
+    float top = r.z > 0.01 ? (ax < 0.06 ? 0.79 + 0.9 * ax : 0.844) : 0.836;
+    vec2 e = vec2((ax - 0.13) / 0.066, (r.y - 0.80) / 0.125);
+    return min(r.y - 0.50, min(top - r.y, (length(e) - 1.0) * 0.06));
+  }
+  return min(0.565 - r.y, r.y - 0.315);
+}`;
+function uniformMat(c1, c2, kind) {
+  return packMat('uni|' + c1 + '|' + c2 + '|' + kind, () => {
+    const m = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.82, side: THREE.DoubleSide });
+    const u1 = { value: new THREE.Color(c1) }, u2 = { value: new THREE.Color(c2) }, uk = { value: kind };
+    m.onBeforeCompile = sh => {
+      sh.uniforms.uC1 = u1; sh.uniforms.uC2 = u2; sh.uniforms.uKind = uk;
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 aRest;\nvarying vec3 vRest;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = aRest;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uC1;\nuniform vec3 uC2;\nuniform float uKind;\nvarying vec3 vRest;' + UNIFORM_GLSL)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          float cut = uniCut(vRest);
+          if (cut < 0.0) discard;
+          float band = uKind < 0.5 ? 0.0095 : 0.013;
+          diffuseColor.rgb *= mix(uC2, uC1, smoothstep(band - 0.0012, band + 0.0012, cut));`);
+    };
+    m.customProgramCacheKey = () => 'uniform-cut';
+    return m;
+  });
+}
+function packMat(key, make) {
+  if (!packCache.has(key)) packCache.set(key, make());
+  return packCache.get(key);
+}
+export async function loadPlayerPack(base = 'models/') {
+  try {
+    const [man, bin] = await Promise.all([fetch(base + 'players.json').then(r => r.json()), fetch(base + 'players.bin').then(r => r.arrayBuffer())]);
+    const geo = {};
+    for (const [name, m] of Object.entries(man.meshes)) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(bin, m.pos, m.count * 3), 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(new Int8Array(bin, m.nor, m.count * 3), 3, true));
+      g.setAttribute('uv', new THREE.Float16BufferAttribute(new Uint16Array(bin, m.uv, m.count * 2), 2));
+      g.setAttribute('skinIndex', new THREE.BufferAttribute(new Uint8Array(bin, m.si, m.count * 4), 4));
+      g.setAttribute('skinWeight', new THREE.BufferAttribute(new Uint8Array(bin, m.sw, m.count * 4), 4, true));
+      g.setIndex(new THREE.BufferAttribute(new Uint16Array(bin, m.idx, m.index), 1));
+      if (m.rest != null) g.setAttribute('aRest', new THREE.BufferAttribute(new Float32Array(bin, m.rest, m.count * 3), 3));
+      for (const gr of m.groups) g.addGroup(gr.start, gr.count, gr.mat);
+      g.computeBoundingSphere();
+      geo[name] = g;
+    }
+    PACK = { ...man, geo, base };
+    return true;
+  } catch (e) {
+    console.warn('player pack unavailable, using procedural players', e);
+    return false;
+  }
+}
+
 export class PlayerModel {
   constructor(p, team, isUser) {
     const H = p.heightFt;
     this.H = H;
+    if (PACK && !p.procedural) { this.buildFromPack(p, team); this.finish(H, isUser); return; }
     // Proportions (feet). Shoulder pivot height + arm + grip = reachOf(H).
     this.legLen = 0.5 * H;
     this.ankleH = 0.28;
@@ -242,19 +316,15 @@ export class PlayerModel {
       const sock = mesh(new THREE.CylinderGeometry(0.158 * rk, 0.142 * rk, 0.5, 12), sockMat);
       sock.position.y = -this.shin + 0.22; kn.add(sock);
       const an = new THREE.Group(); an.position.y = -this.shin; kn.add(an);
-      // Shoe: rubber sole, leather upper, toe box, accent stripe, collar
-      const soleG = new THREE.CapsuleGeometry(0.205, 0.62, 4, 10); soleG.rotateX(Math.PI / 2);
-      const sole = mesh(soleG, soleMat); sole.scale.set(1.05, 0.32, 1); sole.position.set(0, -this.ankleH + 0.06, 0.17); an.add(sole);
-      const upG = new THREE.CapsuleGeometry(0.185, 0.52, 4, 10); upG.rotateX(Math.PI / 2);
-      const upper = mesh(upG, shoeMat, true); upper.scale.set(1, 0.72, 1); upper.position.set(0, -this.ankleH + 0.17, 0.16); an.add(upper);
-      const collarS = mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.2, 10), shoeMat); collarS.position.set(0, -0.06, -0.02); an.add(collarS);
-      const sw = mesh(new THREE.BoxGeometry(0.02, 0.07, 0.42), accent);
-      sw.position.set(sx * 0.19, -this.ankleH + 0.16, 0.14); sw.rotation.x = -0.18; an.add(sw);
-      const sw2 = sw.clone(); sw2.position.x = -sx * 0.19; an.add(sw2);
+      this.addShoe(an, sx, shoeMat, soleMat, accent, 1);
       return { hp, kn, an };
     };
     this.legL = mkLeg(1); this.legR = mkLeg(-1);
+    this.finish(H, isUser);
+  }
 
+  // Shared by both body types: user ring/arrow, blob shadow, pose state
+  finish(H, isUser) {
     if (isUser) {
       const ring = new THREE.Mesh(new THREE.RingGeometry(1.5, 1.9, 32),
         new THREE.MeshBasicMaterial({ color: '#ffd23f', transparent: true, opacity: 0.85, depthWrite: false }));
@@ -280,9 +350,155 @@ export class PlayerModel {
     this.handWorldL = new THREE.Vector3();
     this.ballWorld = new THREE.Vector3();
     this.ballWorldL = new THREE.Vector3();
+    this.ballWorld2 = new THREE.Vector3();
     this.extraSpin = 0;
     this.yOff = 0;
     this._v = new THREE.Vector3(); this._s = new THREE.Vector3(); this._t = new THREE.Vector3();
+  }
+
+  // MakeHuman body (see tools/build_models.py): one skinned mesh bound to the same rig the poses drive,
+  // so every animation, the rim IK and the ball attachment work unchanged.
+  buildFromPack(p, team) {
+    const H = this.H, P = PACK, J = P.joints;
+    const wk = p.build === 'slim' ? 0.94 : p.build === 'strong' ? 1.07 : 1;
+    const d = (a, b) => Math.hypot(J[a][0] - J[b][0], J[a][1] - J[b][1], J[a][2] - J[b][2]) * H;
+    this.legLen = J.pelvis[1] * H;
+    this.ankleH = J.ankle[1] * H;
+    this.thigh = d('hip', 'knee');
+    this.shin = d('knee', 'ankle');
+    this.torsoLen = (J.neck[1] - J.pelvis[1]) * H;
+    this.shY = (J.shoulder[1] - J.pelvis[1]) * H;
+    this.ua = d('shoulder', 'elbow');
+    this.fa = d('elbow', 'wrist');
+    this.grip = reachOf(H) - (this.legLen + this.shY + this.ua + this.fa);
+    const tl = this.torsoLen;
+    const jerseyC = team.c1, trimC = team.c2;
+
+    this.root = new THREE.Group();
+    this.body = new THREE.Group(); this.root.add(this.body);
+    this.pelvis = new THREE.Group(); this.pelvis.position.y = this.legLen; this.body.add(this.pelvis);
+    this.torso = new THREE.Group(); this.pelvis.add(this.torso);
+    this.neck = new THREE.Group(); this.neck.position.y = tl; this.torso.add(this.neck);
+    this.head = new THREE.Group(); this.head.position.set(0, (J.crown[1] - J.neck[1]) * H * 0.55, 0.04 * H); this.neck.add(this.head);
+    const mkArm = (sx) => {
+      const sh = new THREE.Group(); sh.position.set(sx * J.shoulder[0] * H * wk, this.shY, 0); this.torso.add(sh);
+      const el = new THREE.Group(); el.position.y = -this.ua; sh.add(el);
+      const wr = new THREE.Group(); wr.position.y = -this.fa; el.add(wr);
+      const hand = new THREE.Object3D(); hand.position.y = -0.045 * H; wr.add(hand);
+      const grip = new THREE.Object3D(); grip.position.y = -this.grip; wr.add(grip);
+      const palmBall = new THREE.Object3D(); palmBall.position.set(0, -0.05 * H, 0.07 * H); wr.add(palmBall);
+      return { sh, el, wr, hand, grip, palmBall, sx };
+    };
+    this.armL = mkArm(1); this.armR = mkArm(-1);
+    const mkLeg = (sx) => {
+      const hp = new THREE.Group(); hp.position.set(sx * J.hip[0] * H * wk, (J.hip[1] - J.pelvis[1]) * H, 0); this.pelvis.add(hp);
+      const kn = new THREE.Group(); kn.position.y = -this.thigh; hp.add(kn);
+      const an = new THREE.Group(); an.position.y = -this.shin; kn.add(an);
+      return { hp, kn, an };
+    };
+    this.legL = mkLeg(1); this.legR = mkLeg(-1);
+
+    // Bind pose = the mesh's A-pose: aim each segment at its landmark, keep the feet flat
+    const aimAt = (g, parentInvDir, from, to) => {
+      const v = new THREE.Vector3(to[0] - from[0], to[1] - from[1], to[2] - from[2]).applyQuaternion(parentInvDir).normalize();
+      return v;
+    };
+    const L = (k, sx) => [J[k][0] * sx * wk, J[k][1], J[k][2]];
+    const q = new THREE.Quaternion();
+    for (const [arm, sx] of [[this.armL, 1], [this.armR, -1]]) {
+      const v = aimAt(arm.sh, q.identity(), L('shoulder', sx), L('elbow', sx));
+      arm.sh.rotation.set(Math.atan2(-v.z, -v.y), 0, Math.asin(Math.max(-1, Math.min(1, v.x))));
+      arm.sh.updateMatrixWorld(true);
+      const inv = arm.sh.getWorldQuaternion(new THREE.Quaternion()).invert();
+      const f = aimAt(arm.el, inv, L('elbow', sx), L('wrist', sx));
+      arm.el.rotation.x = Math.atan2(-f.z, -f.y);
+      arm.el.updateMatrixWorld(true);
+      const inv2 = arm.el.getWorldQuaternion(new THREE.Quaternion()).invert();
+      const h = aimAt(arm.wr, inv2, L('wrist', sx), L('tip', sx));
+      arm.wr.rotation.x = Math.atan2(-h.z, -h.y);
+      arm.wr.rotation.y = -sx * Math.PI / 2; // MakeHuman palms face the thighs; yaw 0 turns them forward
+    }
+    for (const [leg, sx] of [[this.legL, 1], [this.legR, -1]]) {
+      const v = aimAt(leg.hp, q.identity(), L('hip', sx), L('knee', sx));
+      leg.hp.rotation.set(Math.atan2(-v.z, -v.y), 0, Math.asin(Math.max(-1, Math.min(1, v.x))));
+      leg.hp.updateMatrixWorld(true);
+      const inv = leg.hp.getWorldQuaternion(new THREE.Quaternion()).invert();
+      const s2 = aimAt(leg.kn, inv, L('knee', sx), L('ankle', sx));
+      leg.kn.rotation.x = Math.atan2(-s2.z, -s2.y);
+      leg.kn.updateMatrixWorld(true);
+      leg.an.quaternion.copy(leg.kn.getWorldQuaternion(new THREE.Quaternion()).invert()); // foot level in the world
+    }
+    this.root.updateMatrixWorld(true);
+    this.packed = true;
+    const bones = [this.pelvis, this.torso, this.neck, this.armL.sh, this.armL.el, this.armL.wr, this.armR.sh, this.armR.el, this.armR.wr,
+      this.legL.hp, this.legL.kn, this.legL.an, this.legR.hp, this.legR.kn, this.legR.an];
+    const skeleton = new THREE.Skeleton(bones);
+    const skinned = (geo, material) => {
+      const m = new THREE.SkinnedMesh(geo, material);
+      m.scale.set(H * wk, H, H * wk);
+      m.castShadow = true; m.frustumCulled = false;
+      this.root.add(m);
+      m.updateMatrixWorld(true);
+      m.bind(skeleton);
+      return m;
+    };
+    // Skin: closest texture, tinted to the exact tone
+    const tone = new THREE.Color(p.skin || '#c68642');
+    const lumT = tone.r * 0.3 + tone.g * 0.59 + tone.b * 0.11;
+    const lumOf = c => c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
+    const toneS = tone.clone().convertLinearToSRGB();
+    const sk = Object.keys(P.skins).reduce((a, b) => Math.abs(lumOf(P.skins[a].mean) - (toneS.r * 0.3 + toneS.g * 0.59 + toneS.b * 0.11)) <= Math.abs(lumOf(P.skins[b].mean) - (toneS.r * 0.3 + toneS.g * 0.59 + toneS.b * 0.11)) ? a : b);
+    const mean = new THREE.Color().setRGB(...P.skins[sk].mean, THREE.SRGBColorSpace);
+    const tint = new THREE.Color(Math.min(2.2, tone.r / mean.r), Math.min(2.2, tone.g / mean.g), Math.min(2.2, tone.b / mean.b));
+    void lumT;
+    skinned(P.geo.body, packMat('skin_' + sk + '|' + tint.getHexString(), () => new THREE.MeshStandardMaterial({ map: packTex(P.skins[sk].tex), color: tint, roughness: 0.62 })));
+    skinned(P.geo.jersey, uniformMat(jerseyC, trimC, 0));
+    skinned(P.geo.shorts, uniformMat(jerseyC, trimC, 1));
+    const hair = p.hair === 'Locs' ? 'Fade' : p.hair; // Locs retired; old saves get a Fade
+    const style = P.hair[hair];
+    if (P.geo.eyes) skinned(P.geo.eyes, packMat('eyes', () => new THREE.MeshStandardMaterial({ map: packTex('eyes_brown.jpg'), roughness: 0.3 })));
+    if (style) skinned(P.geo[style.mesh], packMat('hair_' + hair, () => new THREE.MeshStandardMaterial({ map: packTex(style.tex), color: '#5a5450', alphaTest: 0.6, side: THREE.DoubleSide, roughness: 0.85 })));
+
+    // Numbers on the chest and back, sneakers and socks, accessories
+    const ntex = numberTexture(p.num, trimC, shade(jerseyC, 0.5));
+    const nm = new THREE.MeshBasicMaterial({ map: ntex, transparent: true, depthWrite: false });
+    const back = mesh(new THREE.PlaneGeometry(0.17 * H * wk, 0.17 * H), nm);
+    back.position.set(0, 0.2 * H, -0.058 * H * wk); back.rotation.y = Math.PI; this.torso.add(back);
+    const front = mesh(new THREE.PlaneGeometry(0.1 * H * wk, 0.1 * H), nm);
+    front.position.set(0, 0.2 * H, 0.094 * H * wk); front.rotation.x = -0.12; this.torso.add(front);
+    const shoeC = p.shoe || '#f2f2f2';
+    const shoeMat = mat(shoeC, 0.45), soleMat = mat(lum(shoeC) > 0.5 ? '#2a2a2a' : '#f0f0f0', 0.8);
+    const accent = mat(lum(shoeC) > 0.5 ? (lum(trimC) > 0.85 ? jerseyC : trimC) : '#ffffff', 0.5);
+    for (const [leg, sx] of [[this.legL, 1], [this.legR, -1]]) {
+      const sock = mesh(new THREE.CylinderGeometry(0.024 * H, 0.021 * H, 0.06 * H, 12), mat('#f7f7f7', 0.9));
+      sock.position.y = 0.03 * H; leg.an.add(sock);
+      this.addShoe(leg.an, sx, shoeMat, soleMat, accent, 0.155 * H);
+    }
+    if (p.headband) {
+      const hb = mesh(new THREE.CylinderGeometry(0.05 * H, 0.05 * H, 0.014 * H, 24, 1, true), mat(team.c2 === '#f4f4f4' ? '#ffffff' : team.c2, 0.9));
+      hb.scale.set(0.98, 1, 1.18); hb.position.set(0, 0.034 * H, 0.004 * H); hb.rotation.x = -0.18; this.head.add(hb);
+    }
+    if (p.sleeve) {
+      const sl = mesh(limbGeo(0.022 * H, 0.017 * H, this.fa * 0.92, 0.003 * H, 0.28), mat('#111111', 0.6));
+      this.armR.el.add(sl);
+    }
+    if ((p.num || 0) % 3 === 0) {
+      const wb = mesh(new THREE.CylinderGeometry(0.02 * H, 0.02 * H, 0.03 * H, 10), mat(lum(jerseyC) > 0.85 ? trimC : jerseyC, 0.9));
+      wb.position.y = -this.fa + 0.02 * H; this.armL.el.add(wb);
+    }
+  }
+
+  // Sneaker on an ankle group: rubber sole, upper, collar, accent stripes (s scales it to the foot)
+  addShoe(an, sx, shoeMat, soleMat, accent, s) {
+    const g = new THREE.Group(); g.scale.setScalar(s); g.position.y = -this.ankleH + 0.28 * s; an.add(g);
+    const soleG = new THREE.CapsuleGeometry(0.205, 0.62, 4, 10); soleG.rotateX(Math.PI / 2);
+    const sole = mesh(soleG, soleMat); sole.scale.set(1.05, 0.32, 1); sole.position.set(0, -0.22, 0.17); g.add(sole);
+    const upG = new THREE.CapsuleGeometry(0.185, 0.52, 4, 10); upG.rotateX(Math.PI / 2);
+    const upper = mesh(upG, shoeMat, true); upper.scale.set(1, 0.72, 1); upper.position.set(0, -0.11, 0.16); g.add(upper);
+    const collarS = mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.2, 10), shoeMat); collarS.position.set(0, -0.06, -0.02); g.add(collarS);
+    const sw = mesh(new THREE.BoxGeometry(0.02, 0.07, 0.42), accent);
+    sw.position.set(sx * 0.19, -0.12, 0.14); sw.rotation.x = -0.18; g.add(sw);
+    const sw2 = sw.clone(); sw2.position.x = -sx * 0.19; g.add(sw2);
   }
 
   buildHead(p, skin, skinDark, skinC, team) {
@@ -311,7 +527,7 @@ export class PlayerModel {
       const eb = mesh(new THREE.BoxGeometry(0.13, 0.028, 0.03), hairC);
       eb.position.set(sx * 0.13, 0.1, 0.36); eb.rotation.z = -sx * 0.12; head.add(eb);
     }
-    this.addHair(p.hair, head);
+    this.addHair(p.hair === 'Locs' ? 'Fade' : p.hair, head);
     // Facial hair on some players (stable per player)
     const seed = ((p.num || 0) * 7 + (p.name || '').length * 13) % 10;
     if (seed < 3 && p.hair !== 'Bald') {
@@ -345,24 +561,12 @@ export class PlayerModel {
       const top = mesh(new THREE.SphereGeometry(0.36, 16, 10, 0, Math.PI * 2, 0, 1.1), hairMat);
       top.position.set(0, 0.16, 0); top.scale.set(0.95, 0.9, 1.05); head.add(top);
     }
-    if (style === 'Locs') {
-      for (let i = 0; i < 22; i++) {
-        const a = (i / 22) * Math.PI * 2;
-        if (Math.cos(a) > 0.5) continue;
-        const l = mesh(new THREE.CapsuleGeometry(0.05, 0.55 + (i % 3) * 0.08, 3, 5), hairMat);
-        l.position.set(Math.sin(a) * 0.36, -0.22, Math.cos(a) * 0.36);
-        l.rotation.set(Math.cos(a) * 0.25, 0, -Math.sin(a) * 0.25);
-        head.add(l);
-      }
-      const tie = mesh(new THREE.TorusGeometry(0.42, 0.06, 6, 20), hairMat);
-      tie.rotation.x = Math.PI / 2; tie.position.y = 0.1; tie.scale.set(0.88, 1, 0.98); head.add(tie);
-    }
   }
 
   defaultPose() {
     return { crouch: 0.2, lean: 0.1, tilt: 0, twist: 0, headX: 0, headY: 0,
       sLx: 0.1, sLz: 0.12, eL: -0.3, sRx: 0.1, sRz: -0.12, eR: -0.3, wL: 0, wR: 0,
-      hLx: 0, hLz: 0.04, kL: 0.2, hRx: 0, hRz: -0.04, kR: 0.2, fL: 0, fR: 0, bob: 0, roll: 0, side: 0 };
+      hLx: 0, hLz: 0.04, kL: 0.2, hRx: 0, hRz: -0.04, kR: 0.2, fL: 0, fR: 0, bob: 0, roll: 0, side: 0, twL: 1.2, twR: 1.2 };
   }
 
   // Build a target pose from the sim state, blend toward it, and apply. Returns how the ball is carried.
@@ -468,7 +672,7 @@ export class PlayerModel {
     let spin = 0;
     switch (act) {
       case 'shoot': {
-        // Load the ball above the head, dip, jump; the release (meter full) is at the top of the jump
+        // Dip with the ball low, drive it up as the legs extend; the release (meter full) is at the top of the jump
         const t = p.actionT || 0, ja = p.jumpAt || 0.2;
         const tLoad = Math.min(0.2, ja * 0.6);
         const g = ease(clamp01(t / tLoad));
@@ -486,20 +690,26 @@ export class PlayerModel {
           T.wR = rel ? 0.9 : -0.3;
           if (!rel) ball = 'R';
         } else {
-          // One-hand jumper: ball on the shooting hand at the set point (elbow under it, wrist cocked),
-          // guide hand on the side. The arm extends through the release so the ball leaves the fingertips.
-          const set = g;
-          const ext = rel ? 1 : ease(clamp01(((p.meter || 0) - 0.7) / 0.3));
+          // One-hand jumper in six beats: setup (ball at the waist), dip (ball and knees drop), drive
+          // (legs extend, ball comes up to the forehead), lift (set point above the forehead, palm under
+          // the ball, wrist cocked), release at the top of the jump (arm extends as the meter fills) and
+          // the follow-through (gooseneck held, guide hand off).
+          const drive = ease(clamp01((t - ja + 0.04) / 0.14));
+          const lift = ease(clamp01((t - ja - 0.08) / 0.14));
+          const ext = rel ? 1 : ease(clamp01(((p.meter || 0) - 0.72) / 0.28));
           const hi = p.shotStyle === 'fade' ? -0.2 : 0;
-          T.sRx = lerp(-0.9, lerp(-1.95, -2.7 + hi, ext), set); T.sRz = -0.05;
-          T.eR = lerp(-1.3, lerp(-1.25, -0.05, ext), set);
-          T.wR = rel ? 1.2 : lerp(-0.3, -0.7, set);
+          const low = lerp(-0.55, -0.3, dip), lowE = lerp(-1.3, -1.05, dip);
+          T.sRx = lerp(lerp(lerp(low, -1.95, drive), -2.3, lift), -2.75 + hi, ext); T.sRz = lerp(-0.3, -0.05, drive);
+          T.eR = lerp(lerp(lerp(lowE, -1.45, drive), -1.4, lift), -0.05, ext);
+          T.wR = rel ? 1.2 : lerp(0, lerp(-0.6, -0.85, lift), drive);
           if (!rel) {
-            T.sLx = lerp(-0.9, -1.85 + hi * 0.5, set); T.sLz = lerp(0.3, 0.38, set); T.eL = lerp(-1.3, -1.05, set); T.wL = -0.2;
+            T.sLx = lerp(lerp(low, -1.85, drive), -2.15 + hi * 0.5, lift); T.sLz = lerp(0.3, 0.38, drive);
+            T.eL = lerp(lerp(lowE, -1.1, drive), -1.15, lift); T.wL = -0.2;
           } else {
             // Guide hand comes off the ball, shooting hand holds the gooseneck
             T.sLx = -1.9; T.sLz = 0.7; T.eL = -0.75; T.wL = 0.4;
           }
+          T.headX = lerp(0.15, -0.2, drive);
           T.lean = t < ja ? 0.1 * dip : -0.06; T.headX = -0.2;
           if (p.shotStyle === 'fade') {
             // Kobe/MJ fadeaway: lean back, lead knee up, release high
@@ -507,7 +717,7 @@ export class PlayerModel {
             T.lean = -0.5 * up; T.hLx = -1.15 * up; T.kL = 0.3 + 1.1 * up; T.hRx = 0.25 * up; T.kR = 0.15; T.headX = -0.15 * up;
             if (p.turnaround) spin = (p.turnSide || 1) * Math.PI * (1 - ease(clamp01(k / 0.28)));
           }
-          if (!rel) ball = 'R';
+          if (!rel) ball = drive < 0.35 ? 'both' : 'R';
         }
         if (p.ft) { T.hLx = T.hRx = 0; }
         break;
@@ -779,6 +989,15 @@ export class PlayerModel {
         break;
       }
     }
+    // Palms: facing the ball when it's in the hands or going up for it, relaxed toward the body otherwise
+    const handsOn = (ball && ball !== 'dribble' && ball !== 'vmove') || ['shoot', 'layup', 'dunk', 'hang', 'block', 'rebound', 'pass', 'steal', 'celebrate', 'shotfollow'].includes(act);
+    if (handsOn) { T.twL = 0; T.twR = 0; }
+    // One-hand dunks: once the arm is up, the hand turns over to palm the ball from behind and on
+    // top (palm toward the rim), then the wrist snaps it down through the rim.
+    const sh1 = game && game.ball && game.ball.state === 'shot' && game.ball.shot;
+    if ((act === 'dunk' && ball === 'R') || (act === 'hang' && sh1 && sh1.kind === 'dunk' && sh1.shooter === p && !TWO_HAND[p.dunkStyle || 'two'])) {
+      T.twR = Math.PI * ease(clamp01((Math.abs(T.sRx) - 1.5) / 0.9));
+    }
     // Mid-air contact jolt (fouls)
     if (p.hitT > 0) {
       const hj = p.hitT / 0.45;
@@ -817,6 +1036,7 @@ export class PlayerModel {
     this.armR.el.rotation.x = P.eR;
     this.armL.wr.rotation.x = P.wL;
     this.armR.wr.rotation.x = P.wR;
+    if (this.packed) { this.armL.wr.rotation.y = -P.twL; this.armR.wr.rotation.y = P.twR; }
     this.legL.hp.rotation.set(hL, 0, P.hLz);
     this.legL.kn.rotation.x = kL;
     this.legR.hp.rotation.set(hR, 0, P.hRz);
@@ -827,6 +1047,8 @@ export class PlayerModel {
     this.root.updateMatrixWorld(true);
     this.rimReach(p, act, k, dt);
     this.blockReach(p, game, act);
+    const sh = game && game.ball && game.ball.state === 'shot' && game.ball.shot;
+    if (ball === 'over' || ball === 'both' || (act === 'hang' && sh && sh.kind === 'dunk' && sh.shooter === p && TWO_HAND[p.dunkStyle || 'two'])) this.squeezeBall();
 
     this.blob.scale.setScalar(Math.max(0.5, 1 - yJump * 0.08));
     this.blob.material.opacity = 0.28 * Math.max(0.35, 1 - yJump * 0.12);
@@ -838,6 +1060,14 @@ export class PlayerModel {
     this.armL.hand.getWorldPosition(this.handWorldL);
     this.armR.palmBall.getWorldPosition(this.ballWorld);
     this.armL.palmBall.getWorldPosition(this.ballWorldL);
+    // Two-hand hold: the ball sits between the grips, pushed out along the palms just far enough
+    // that its surface touches both hands.
+    const gR = this.armR.grip.getWorldPosition(_v1), gL = this.armL.grip.getWorldPosition(_v2);
+    const half = gR.distanceTo(gL) / 2;
+    _v3.subVectors(this.ballWorld, gR).add(_v4.subVectors(this.ballWorldL, gL));
+    if (_v3.lengthSq() < 1e-6) _v3.set(0, 1, 0);
+    _v3.normalize().multiplyScalar(Math.sqrt(Math.max(0, 0.44 * 0.44 - half * half)));
+    this.ballWorld2.addVectors(gR, gL).multiplyScalar(0.5).add(_v3);
     return ball;
   }
 
@@ -855,6 +1085,8 @@ export class PlayerModel {
       if (k < rel) { w = ease(clamp01((k - from) / Math.max(0.01, rel - from))); hangY = 0.75; lift = 0.35; }
       else { w = 1 - clamp01((k - rel) / 0.3); hangY = 0.12; }
     } else if (act === 'hang') { w = 1; hangY = 0.06; }
+    // First instant of the hang: the hand(s) finish pushing the ball down through the middle of the rim
+    const slam = act === 'hang' ? 1 - clamp01(((p.actionT || 0) - 0.08) / 0.1) : 0;
     const prevOff = this.yOff;
     if (w <= 0.001) {
       this.yOff = damp(this.yOff, 0, 14, dt);
@@ -866,7 +1098,8 @@ export class PlayerModel {
     const cx = side * HOOP_X;
     let dx = p.pos.x - cx, dz = p.pos.z; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
     // Points on the near side of the rim (or above its centre on the way up)
-    const R = act === 'hang' || lift === 0 ? 0.72 : lift;
+    const R = act === 'hang' || lift === 0 ? lerp(0.72, 0.15, slam) : lift;
+    if (slam > 0) hangY = lerp(hangY, 0.45, slam);
     const spread = two ? 0.42 : 0;
     const tgt = (a) => new THREE.Vector3(cx + R * (dx * Math.cos(a) - dz * Math.sin(a)), RIM_Y + hangY, R * (dz * Math.cos(a) + dx * Math.sin(a)));
     const arms = two ? [[this.armR, tgt(-spread)], [this.armL, tgt(spread)]] : [[this.armR, tgt(0)]];
@@ -926,6 +1159,24 @@ export class PlayerModel {
   }
 
   // Point an arm at a world-space target: straight when it can't quite reach, elbow bent when close.
+  // Two-hand holds: swing each arm in at the shoulder so both hands sit on the ball's sides
+  // (the poses are authored for a narrow rig, so on wide shoulders the hands drift apart).
+  squeezeBall() {
+    const gR = this.armR.grip.getWorldPosition(_v1), gL = this.armL.grip.getWorldPosition(_v2);
+    const sep = gR.distanceTo(gL), want = 0.7;
+    if (sep <= want) return;
+    const mid = _v3.addVectors(gR, gL).multiplyScalar(0.5), dir = _v4.subVectors(gR, gL).normalize();
+    for (const [arm, sgn] of [[this.armR, 1], [this.armL, -1]]) {
+      const S = arm.sh.getWorldPosition(this._s), G = arm.grip.getWorldPosition(this._t);
+      const T = this._v.copy(mid).addScaledVector(dir, sgn * want / 2);
+      _q1.setFromUnitVectors(G.sub(S).normalize(), T.sub(S).normalize());
+      arm.sh.getWorldQuaternion(_q2).premultiply(_q1);
+      arm.sh.parent.getWorldQuaternion(_q3).invert();
+      arm.sh.quaternion.copy(_q3.multiply(_q2));
+      arm.sh.updateMatrixWorld(true);
+    }
+  }
+
   aimArm(arm, T, w) {
     const px = arm.sh.rotation.x, pz = arm.sh.rotation.z, pe = arm.el.rotation.x, pw = arm.wr.rotation.x;
     const a = this.ua, b = this.fa + this.grip;

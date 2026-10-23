@@ -357,7 +357,8 @@ export class Renderer {
       const t = game.teams[p.team];
       // Home team wears its colors, away team wears white
       const kit = p.team === game.homeIdx ? t : { ...t, c1: '#f4f4f4', c2: t.c1 };
-      const m = new PlayerModel(p, kit, p.isUser);
+      // Low graphics keeps the lighter procedural players
+      const m = new PlayerModel(this.quality === 'low' ? { ...p, procedural: true } : p, kit, p.isUser);
       this.scene.add(m.root);
       this.models.push(m);
     }
@@ -417,16 +418,24 @@ export class Renderer {
       } else if (mode === 'hand') {
         bp.set(hand.x + fx * 0.2, hand.y + 0.05, hand.z + fz * 0.2);
       } else if (mode === 'both') {
-        bp.set((m.handWorld.x + m.handWorldL.x) / 2 + fx * 0.25, (m.handWorld.y + m.handWorldL.y) / 2 + 0.1, (m.handWorld.z + m.handWorldL.z) / 2 + fz * 0.25);
+        if (m.packed) bp.copy(m.ballWorld2);
+        else bp.set((m.handWorld.x + m.handWorldL.x) / 2 + fx * 0.25, (m.handWorld.y + m.handWorldL.y) / 2 + 0.1, (m.handWorld.z + m.handWorldL.z) / 2 + fz * 0.25);
       } else if (mode === 'over') {
         // Two hands on the ball overhead
-        bp.set((m.ballWorld.x + m.ballWorldL.x) / 2, (m.ballWorld.y + m.ballWorldL.y) / 2 + 0.1, (m.ballWorld.z + m.ballWorldL.z) / 2);
+        bp.copy(m.ballWorld2);
       } else if (mode === 'R') {
         // Ball resting in the right palm
         bp.copy(m.ballWorld);
       }
       // Let the sim know where the ball visually is (used for release point).
       ball.vis = { x: bp.x, y: bp.y, z: bp.z };
+    } else if (ball.state === 'shot' && ball.shot && ball.shot.kind === 'dunk' && ball.shot.shooter && ball.shot.t < ball.shot.T + 0.06) {
+      // Dunk: the ball stays in the hand(s) until it's through the rim
+      const m = this.models[ball.shot.shooter.idx];
+      const two = !['one', 'tomahawk', 'contact', 'windmill'].includes(ball.shot.shooter.dunkStyle);
+      if (two) bp.copy(m.ballWorld2);
+      else bp.copy(m.ballWorld);
+      ball.vis = null;
     } else {
       bp.set(ball.pos.x, ball.pos.y, ball.pos.z);
       ball.vis = null;

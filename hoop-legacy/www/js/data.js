@@ -57,7 +57,7 @@ export const JUMPSHOTS = {
 };
 
 export const SKIN_TONES = ['#f1c9a5', '#e0ac69', '#c68642', '#a0663a', '#8d5524', '#5c3a1e'];
-export const HAIR = ['Bald', 'Buzz', 'Fade', 'Afro', 'Locs'];
+export const HAIR = ['Bald', 'Buzz', 'Fade', 'Afro', 'Swoop'];
 
 // Fictional league, real cities.
 export const TEAMS = [

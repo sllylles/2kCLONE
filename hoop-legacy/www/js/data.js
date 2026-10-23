@@ -50,6 +50,51 @@ export const DRIBBLE_STYLES = {
   flashy: { name: 'Flashy', desc: 'Spins and behind-the-backs. High risk, high reward.', cooldown: 0.36, burst: 1.15, ankle: 1.7, risk: 0.03 },
 };
 
+// Dunks that need extra hang time (and start the reach for the rim later)
+export const FLASHY_DUNKS = ['windmill', '360', 'btl', 'windmill2', '360wm', 'cradle'];
+// Dunks finished with one hand (the ball rides in the right palm)
+export const ONE_HAND_DUNKS = ['one', 'tomahawk', 'contact', 'windmill', 'leaner', 'backscratch', 'cradle', '360wm'];
+
+// How a player moves, built once per game from their size, build, ratings and playstyle, plus the dribble
+// style and jumpshot you picked for your own player (AI players get styles that fit their game).
+export function animProfile(p, picks = {}) {
+  const r = p.r || p.ratings || {};
+  const g = k => r[k] ?? 60;
+  const H = p.heightFt || 6.5, build = p.build || 'athletic';
+  let seed = 7;
+  for (const ch of String(p.name || '') + (p.num ?? '')) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  const rnd = k => (Math.imul(seed ^ Math.imul(k, 2654435761), 2654435761) >>> 0) / 4294967296;
+  const c01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const big = c01((H - 6.55) / 0.75), guard = c01((6.45 - H) / 0.5);
+  const handle = c01((g('handle') - 45) / 45);
+  const strong = build === 'strong' ? 1 : build === 'slim' ? 0 : 0.5;
+  const dribble = picks.dribble || (
+    g('handle') >= 82 && rnd(1) < 0.45 ? 'flashy'
+      : (strong >= 1 || big > 0.4) && g('strength') >= 65 ? 'power'
+      : g('speed') >= 80 && rnd(2) < 0.6 ? 'shifty' : 'quick');
+  const shot = Math.max(g('three'), g('mid'));
+  const jumpshot = picks.jumpshot || (big > 0.5 ? 'higharc' : g('three') >= 82 && rnd(3) < 0.5 ? 'quick' : rnd(3) < 0.25 ? 'higharc' : 'standard');
+  const dunkFlair = c01((g('dunk') - 70) / 25) * c01((g('vert') - 50) / 40) * (1 - 0.9 * big) * (1 - 0.3 * strong);
+  const D = c01((Math.max(g('perD'), g('intD')) - 45) / 45);
+  return {
+    big, guard, handle, strong, dribble, jumpshot,
+    // Dribbling: low athletic stance for good handlers (upright for poor ones); style sets rhythm and look
+    dribRate: { quick: 1.22, shifty: 1.08, power: 0.9, flashy: 1.0 }[dribble] * (0.85 + 0.15 * handle),
+    dribLow: handle * (dribble === 'flashy' ? 0.75 : 1),
+    dribWide: dribble === 'flashy' ? 0.35 : dribble === 'shifty' ? 0.2 : 0,
+    // Shooting: set point height, form (poor shooters flare the elbow), leg kick, follow-through
+    setHi: (jumpshot === 'higharc' ? 0.3 : jumpshot === 'quick' ? -0.25 : 0) + big * 0.15,
+    form: c01((shot - 45) / 45),
+    kick: rnd(4) < 0.22 ? (rnd(5) < 0.5 ? 1 : -1) : 0,
+    dunkFlair, power: c01(strong * 0.6 + big * 0.6),
+    // Defense: stance depth and activity; bigs keep their hands high
+    D, defHigh: big,
+    // Running: bigs stride long and slow with less arm pump, guards are quick and lean in
+    cadence: 1 + guard * 0.1 - big * 0.12, stride: 1 + big * 0.12 - guard * 0.05, pump: 1 + guard * 0.15 - big * 0.2,
+    heavy: 0.8 + strong * 0.4 + big * 0.2,
+  };
+}
+
 export const JUMPSHOTS = {
   standard: { name: 'Standard', fill: 0.62, window: 1.0 },
   quick:    { name: 'Quick Release', fill: 0.50, window: 0.85 },

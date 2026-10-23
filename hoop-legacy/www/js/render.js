@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { HOOP_X, RIM_Y, COURT_HALF_L, COURT_HALF_W } from './game.js';
 import { PlayerModel } from './player.js';
+import { ONE_HAND_DUNKS } from './data.js';
 export { PlayerModel };
 
 const PX = 20; // canvas pixels per foot
@@ -401,7 +402,9 @@ export class Renderer {
         const top = hand.y - 0.3;
         const f = Math.abs(Math.cos(d * Math.PI));
         const lead = (1 - f) * spd * 0.05;
-        bp.set(hand.x + fx * (push + lead), 0.42 + (top - 0.42) * f, hand.z + fz * (push + lead));
+        // Flashy / shifty handlers carry the ball out wider on the dribble-hand side
+        const wide = (p.anim ? p.anim.dribWide : 0) * (p.dribbleHand === 'R' ? -1 : 1) * (1 - f * 0.5);
+        bp.set(hand.x + fx * (push + lead) + fz * wide, 0.42 + (top - 0.42) * f, hand.z + fz * (push + lead) - fx * wide);
       } else if (mode === 'vmove') {
         // Crossover / between the legs / behind the back: V-shaped bounce from one hand to the other
         const k = Math.min(1, p.actionT / p.actionDur);
@@ -432,7 +435,7 @@ export class Renderer {
     } else if (ball.state === 'shot' && ball.shot && ball.shot.kind === 'dunk' && ball.shot.shooter && ball.shot.t < ball.shot.T + 0.06) {
       // Dunk: the ball stays in the hand(s) until it's through the rim
       const m = this.models[ball.shot.shooter.idx];
-      const two = !['one', 'tomahawk', 'contact', 'windmill'].includes(ball.shot.shooter.dunkStyle);
+      const two = !ONE_HAND_DUNKS.includes(ball.shot.shooter.dunkStyle);
       if (two) bp.copy(m.ballWorld2);
       else bp.copy(m.ballWorld);
       ball.vis = null;

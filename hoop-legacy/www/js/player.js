@@ -2,7 +2,7 @@
 // Proportions are tied to reachOf() so the sim and the model agree on how high a hand gets.
 import * as THREE from 'three';
 import { HOOP_X, RIM_Y } from './game.js';
-import { reachOf } from './data.js';
+import { reachOf, FLASHY_DUNKS, animProfile } from './data.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
@@ -10,8 +10,10 @@ const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const ease = t => t * t * (3 - 2 * t);
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
+const DEF_ANIM = animProfile({});
 const MOVE_SWITCH = { cross: 1, behind: 1, btl: 1 };
-const TWO_HAND = { two: 1, cockback: 1, clutch: 1, '360': 1, reverse: 1, btl: 1 };
+const TWO_HAND = { two: 1, cockback: 1, clutch: 1, '360': 1, reverse: 1, btl: 1, windmill2: 1 };
+const ONE_HAND = { one: 1, tomahawk: 1, contact: 1, windmill: 1, leaner: 1, backscratch: 1, cradle: 1, '360wm': 1 };
 function wrapLerp(a, b, t) {
   let d = b - a;
   while (d > Math.PI) d -= Math.PI * 2;
@@ -148,6 +150,22 @@ function uniformMat(c1, c2, kind, num = null) {
     m.customProgramCacheKey = () => 'uniform-cut';
     return m;
   });
+}
+// Body skin, with crew socks painted on below the calf (on the rest pose), so the socks bend with the ankle
+// instead of a rigid tube the skin pokes through
+function skinMat(map, tint) {
+  const m = new THREE.MeshStandardMaterial({ map, color: tint, roughness: 0.62 });
+  m.onBeforeCompile = sh => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vBindY;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBindY = position.y;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vBindY;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        float sock = 1.0 - smoothstep(0.099, 0.101, vBindY);
+        vec3 sockC = vec3(0.9) * (1.0 - 0.12 * (smoothstep(0.086, 0.088, vBindY) - smoothstep(0.092, 0.094, vBindY)));
+        diffuseColor.rgb = mix(diffuseColor.rgb, sockC, sock);`);
+  };
+  m.customProgramCacheKey = () => 'skin-socks';
+  return m;
 }
 function packMat(key, make) {
   if (!packCache.has(key)) packCache.set(key, make());
@@ -464,7 +482,7 @@ export class PlayerModel {
     const mean = new THREE.Color().setRGB(...P.skins[sk].mean, THREE.SRGBColorSpace);
     const tint = new THREE.Color(Math.min(2.2, tone.r / mean.r), Math.min(2.2, tone.g / mean.g), Math.min(2.2, tone.b / mean.b));
     void lumT;
-    skinned(P.geo.body, packMat('skin_' + sk + '|' + tint.getHexString(), () => new THREE.MeshStandardMaterial({ map: packTex(P.skins[sk].tex), color: tint, roughness: 0.62 })));
+    skinned(P.geo.body, packMat('skin_' + sk + '|' + tint.getHexString(), () => skinMat(packTex(P.skins[sk].tex), tint)));
     skinned(P.geo.jersey, uniformMat(jerseyC, trimC, 0, p.num));
     skinned(P.geo.shorts, uniformMat(jerseyC, trimC, 1));
     const hair = p.hair === 'Locs' ? 'Fade' : p.hair; // Locs retired; old saves get a Fade
@@ -472,13 +490,11 @@ export class PlayerModel {
     if (P.geo.eyes) skinned(P.geo.eyes, packMat('eyes', () => new THREE.MeshStandardMaterial({ map: packTex('eyes_brown.jpg'), roughness: 0.3 })));
     if (style) skinned(P.geo[style.mesh], packMat('hair_' + hair, () => new THREE.MeshStandardMaterial({ map: packTex(style.tex), color: '#5a5450', alphaTest: 0.6, side: THREE.DoubleSide, roughness: 0.85 })));
 
-    // Sneakers and socks, accessories
+    // Sneakers and accessories (the socks are painted on the skin: see skinMat)
     const shoeC = p.shoe || '#f2f2f2';
     const shoeMat = mat(shoeC, 0.45), soleMat = mat(lum(shoeC) > 0.5 ? '#2a2a2a' : '#f0f0f0', 0.8);
     const accent = mat(lum(shoeC) > 0.5 ? (lum(trimC) > 0.85 ? jerseyC : trimC) : '#ffffff', 0.5);
     for (const [leg, sx] of [[this.legL, 1], [this.legR, -1]]) {
-      const sock = mesh(new THREE.CylinderGeometry(0.024 * H, 0.021 * H, 0.06 * H, 12), mat('#f7f7f7', 0.9));
-      sock.position.y = 0.03 * H; leg.an.add(sock);
       this.addShoe(leg.an, sx, shoeMat, soleMat, accent, 0.155 * H);
     }
     if (p.headband) {
@@ -579,6 +595,7 @@ export class PlayerModel {
   // Build a target pose from the sim state, blend toward it, and apply. Returns how the ball is carried.
   update(p, game, dt, time) {
     const T = this.defaultPose();
+    const pa = p.anim || DEF_ANIM; // how this player moves (size, build, ratings, styles)
     const spd = Math.hypot(p.vel.x, p.vel.z);
     const runAmt = Math.min(1, spd / 18);
     const act = p.action;
@@ -591,13 +608,13 @@ export class PlayerModel {
     // Idle breathing
     T.bob = Math.sin(time * 2.2 + this.runPhase) * 0.02;
 
-    this.runPhase += dt * (3 + spd * 0.38);
+    this.runPhase += dt * (3 + spd * 0.38) * pa.cadence;
     const ph = this.runPhase;
     if (spd > 1.5) {
       // Run cycle, loose rather than robotic: the pelvis turns with the legs and the shoulders counter it,
       // the hips sway and drop over the stance leg, knees drive and fold through the whole stride, arms
       // swing from the shoulder and a little across the body, elbows open behind, and the head stays steady.
-      const A = 0.3 + runAmt * 0.78;
+      const A = (0.3 + runAmt * 0.78) * pa.stride;
       const s = Math.sin(ph), c = Math.cos(ph);
       T.hLx = -s * A; T.hRx = s * A;
       const fold = x => Math.pow(0.5 + 0.5 * x, 1.6);
@@ -605,12 +622,12 @@ export class PlayerModel {
       T.kR = 0.18 + fold(-Math.sin(ph + 1.25)) * A * 1.7;
       T.fL = Math.max(0, -s) * 0.7 * A; T.fR = Math.max(0, s) * 0.7 * A;
       const sa = Math.sin(ph - 0.25); // arms trail the legs a touch
-      T.sLx = sa * A * 0.95; T.sRx = -sa * A * 0.95;
+      T.sLx = sa * A * 0.95 * pa.pump; T.sRx = -sa * A * 0.95 * pa.pump;
       T.sLz = 0.1 + Math.max(0, -sa) * 0.16 * A; T.sRz = -0.1 - Math.max(0, sa) * 0.16 * A;
       T.eL = -1.15 - runAmt * 0.35 + sa * 0.35; T.eR = -1.15 - runAmt * 0.35 - sa * 0.35;
       T.wL = T.wR = -0.1 - Math.abs(sa) * 0.1;
-      T.lean = 0.08 + runAmt * 0.3;
-      T.bob = (Math.abs(c) * 0.24 - 0.06) * A;
+      T.lean = 0.08 + runAmt * (0.3 + pa.guard * 0.06 - pa.big * 0.06);
+      T.bob = (Math.abs(c) * 0.24 - 0.06) * A * pa.heavy;
       T.crouch = 0.2 + runAmt * 0.06;
       T.yaw = s * 0.17 * A; // pelvis turns with the swing leg
       T.twist = -s * 0.36 * A; // shoulders counter-rotate (relative to the pelvis)
@@ -627,18 +644,23 @@ export class PlayerModel {
     }
     if (onD && !p.hasBall && !act && spd < 15) {
       // Defensive stance with slides
-      T.crouch = 0.8; T.lean = 0.32; T.headX = -0.25; T.yaw = 0; T.side = 0; T.twist = 0; T.tilt = 0;
-      T.sLz = 0.95; T.sRz = -0.95; T.sLx = -0.6; T.sRx = -0.4; T.eL = -0.55; T.eR = -0.5;
-      T.hLz = 0.3; T.hRz = -0.3; T.kL = 0.9; T.kR = 0.9; T.hLx = -0.25; T.hRx = -0.25;
+      // Good defenders sit low and wide with busy hands; weak ones stand taller. Bigs keep their hands high.
+      const D = pa.D, hi = pa.defHigh;
+      T.crouch = lerp(0.5, 0.95, D); T.lean = lerp(0.18, 0.36, D); T.headX = -0.25; T.yaw = 0; T.side = 0; T.twist = 0; T.tilt = 0;
+      T.sLz = lerp(0.6, 1.0, D); T.sRz = -T.sLz; T.sLx = -0.6; T.sRx = -0.4; T.eL = -0.55; T.eR = -0.5;
+      if (hi > 0.35) { T.sLx = T.sRx = -1.3 - 0.9 * hi; T.sLz = 0.75; T.sRz = -0.75; T.eL = T.eR = -0.35; T.crouch -= 0.15 * hi; }
+      const base = lerp(0.2, 0.34, D);
+      T.hLz = base; T.hRz = -base; T.kL = T.kR = lerp(0.6, 1.0, D); T.hLx = -0.25; T.hRx = -0.25;
       if (spd > 1.5 && Math.abs(fwd) < 0.6) {
         const sl = Math.sin(ph * 1.4);
-        T.hLz = 0.3 + sl * 0.22; T.hRz = -0.3 + sl * 0.22;
+        T.hLz = base + sl * 0.22; T.hRz = -base + sl * 0.22;
         T.bob = Math.abs(sl) * 0.08;
       } else if (spd > 1.5) {
         T.hLx = -0.25 - Math.sin(ph) * 0.4; T.hRx = -0.25 + Math.sin(ph) * 0.4;
       }
       // Active hands
-      T.sLx += Math.sin(time * 6 + p.idx) * 0.15;
+      T.sLx += Math.sin(time * (4 + 4 * D) + p.idx) * (0.06 + 0.18 * D);
+      T.sRx += Math.sin(time * (3.5 + 3 * D) + p.idx * 2.1) * 0.1 * D;
       if (p.intenseD) { T.crouch = 1.0; T.sLz = 1.25; T.sRz = -1.25; T.hLz = 0.4; T.hRz = -0.4; }
       // Closing out on a shooter: hand straight up in his face
       if (p.closeT > game.time) { T.sRx = -2.95; T.sRz = -0.1; T.eR = -0.05; T.crouch = 0.5; T.lean = 0.15; T.sLx = -0.9; T.sLz = 0.7; }
@@ -670,13 +692,28 @@ export class PlayerModel {
         if (bump < 0.36) { const f = Math.sin(bump / 0.36 * Math.PI); T.lean = 0.35 - f * 0.65; T.crouch = 1.0; T.twist = f * 0.45 * (domR ? 1 : -1); setArm(!domR, 0.75 + f * 0.5, 0.9, -1.3); T.hLx = -0.3 + f * 0.35; }
         ball = 'dribble';
       } else {
-        // Dribbling: off-arm protects, knees bent, ball pounded
-        const d = p.dribblePhase;
-        const pump = Math.cos(d * Math.PI * 2) * 0.32;
-        setArm(domR, -0.5 + pump - runAmt * 0.3, 0.28, -0.65 - pump * 0.4);
-        if (spd < 6) { setArm(!domR, -0.75, 0.65, -0.7); T.twist = domR ? 0.18 : -0.18; }
-        T.crouch = Math.max(T.crouch, 0.55); T.kL = Math.max(T.kL, 0.6); T.kR = Math.max(T.kR, 0.6);
-        T.lean = Math.max(T.lean, 0.28);
+        // Dribbling: good handlers sit in a low athletic stance (wide base, knees bent, chest over the ball)
+        // and poor ones stand up tall; the dribble style sets the rhythm and the look.
+        const d = p.dribblePhase, low = pa.dribLow, st = pa.dribble, still = spd < 6;
+        const pump = Math.cos(d * Math.PI * 2) * (0.26 + 0.12 * low);
+        setArm(domR, -0.5 + pump - runAmt * 0.3 + low * 0.12, 0.28 + pa.dribWide * 0.7, -0.65 - pump * 0.4 - low * 0.25);
+        const sway = Math.sin(time * (st === 'shifty' ? 3.4 : 2.2) + p.idx);
+        if (st === 'power') setArm(!domR, -1.05, 0.5, -1.45); // off arm barred in front to shield
+        else if (st === 'flashy') setArm(!domR, -0.25 + sway * 0.15, 0.4, -0.45); // loose, swinging
+        else if (still) setArm(!domR, -0.8, 0.4, -1.05); // off hand up in front, protecting
+        if (still) {
+          T.crouch = lerp(0.3, 1.0, low); T.kL = T.kR = lerp(0.35, 1.1, low);
+          T.hLz = 0.05 + 0.24 * low; T.hRz = -T.hLz; T.hLx = T.hRx = -0.2 * low;
+          T.lean = lerp(0.12, 0.42, low);
+          T.twist = (domR ? 0.18 : -0.18);
+          if (st === 'shifty') { T.side = sway * 0.07 * low; T.twist += sway * 0.12; T.hLz += sway * 0.08; T.hRz += sway * 0.08; }
+          else if (st === 'flashy') { T.lean -= 0.1; T.twist += sway * 0.2; T.headX = 0.1; T.bob = Math.abs(Math.sin(d * Math.PI)) * 0.05; }
+          else if (st === 'quick') T.bob = Math.abs(Math.sin(d * Math.PI * 2)) * 0.04 * low; // live, bouncy feet
+          else { T.crouch += 0.06; T.lean += 0.05; }
+        } else {
+          T.crouch = Math.max(T.crouch, lerp(0.25, 0.6, low)); T.lean = Math.max(T.lean, lerp(0.15, 0.38, low));
+          T.kL = Math.max(T.kL, 0.4 + 0.2 * low); T.kR = Math.max(T.kR, 0.4 + 0.2 * low);
+        }
         ball = 'dribble';
       }
     }
@@ -712,8 +749,12 @@ export class PlayerModel {
           const ext = rel ? 1 : ease(clamp01(((p.meter || 0) - 0.72) / 0.28));
           const hi = p.shotStyle === 'fade' ? -0.2 : 0;
           const low = lerp(-0.55, -0.3, dip), lowE = lerp(-1.3, -1.05, dip);
-          T.sRx = lerp(lerp(lerp(low, -1.95, drive), -2.3, lift), -2.75 + hi, ext); T.sRz = lerp(-0.3, -0.05, drive);
-          T.eR = lerp(lerp(lerp(lowE, -1.45, drive), -1.4, lift), -0.05, ext);
+          // Per player: set point height (high-arc and bigs higher, quick release lower), elbow flare for
+          // weaker shooters, and how high the follow-through finishes
+          const sh = pa.setHi, flare = (1 - pa.form) * 0.35;
+          T.sRx = lerp(lerp(lerp(low, -1.95 - sh * 0.3, drive), -2.3 - sh * 0.45, lift), -2.75 + hi - sh * 0.3, ext);
+          T.sRz = lerp(-0.3, -0.05 - flare, drive);
+          T.eR = lerp(lerp(lerp(lowE, -1.45, drive), -1.4 + sh * 0.3, lift), -0.05, ext);
           T.wR = rel ? 1.2 : lerp(0, lerp(-0.6, -0.85, lift), drive);
           if (!rel) {
             T.sLx = lerp(lerp(low, -1.85, drive), -2.15 + hi * 0.5, lift); T.sLz = lerp(0.3, 0.38, drive);
@@ -721,8 +762,10 @@ export class PlayerModel {
           } else {
             // Release: shooting arm locked out up and a little forward with the wrist snapped over
             // (gooseneck); the guide hand comes off the side of the ball and stays up beside it, open.
-            T.sRx = -2.85 + hi; T.sRz = -0.04; T.eR = -0.04; T.wR = 1.25;
+            T.sRx = -2.85 + hi - pa.setHi * 0.25; T.sRz = -0.04 - (1 - pa.form) * 0.2; T.eR = -0.04; T.wR = 1.25;
             T.sLx = -2.55 + hi * 0.5; T.sLz = 0.22; T.eL = -0.3; T.wL = -0.15;
+            // Some shooters kick a leg out on the way up
+            if (pa.kick > 0) { T.hLx = -0.75; T.kL = 0.55; } else if (pa.kick < 0) { T.hRx = -0.75; T.kR = 0.55; }
           }
           T.headX = lerp(0.15, -0.2, drive);
           T.lean = t < ja ? 0.1 * dip : -0.06;
@@ -807,6 +850,34 @@ export class PlayerModel {
               T.sRx = lerp(-1.6, -3.1, g); T.eR = -0.3; T.sLx = -1.25; T.sLz = 0.6; T.eL = -1.4;
               T.hLx = -1.5; T.kL = 1.8; T.hRx = 0.2; T.kR = 0.5; T.lean = 0.2; ball = 'R';
             }
+          } else if (st === 'leaner') {
+            // Leaner: body tilts sideways in the air, ball arm stretched long, off arm flung out for balance
+            T.side = -0.3 * g; T.tilt = -0.2 * g;
+            T.sRx = lerp(-1.5, -3.0, g); T.sRz = lerp(-0.2, -0.45, g); T.eR = -0.15;
+            T.sLx = -0.4; T.sLz = lerp(0.6, 1.5, g); T.eL = -0.2;
+            T.hLx = -1.3; T.kL = 1.5; T.hRx = 0.2; T.kR = 0.4; T.lean = -0.05; ball = 'R';
+          } else if (st === 'backscratch') {
+            // Back-scratcher: ball dropped deep behind the head (elbow pointing at the rim), then thrown down
+            const deep = Math.sin(clamp01(g / 0.8) * Math.PI * 0.5);
+            T.sRx = lerp(-1.6, -3.4, deep); T.eR = lerp(-1.2, -2.5, deep); T.wR = -0.6;
+            T.sLx = -1.2; T.sLz = 0.8; T.eL = -0.5;
+            T.hLx = T.hRx = -1.1; T.kL = T.kR = 2.0; T.lean = -0.4 * deep; T.headX = -0.4; ball = 'R';
+          } else if (st === 'cradle') {
+            // Rock the cradle: ball cupped against the forearm, swung down by the hip and up and over
+            const sw = Math.sin(g * Math.PI);
+            T.sRx = lerp(-1.0, 0.7, sw) - g * g * 3.0; T.eR = -1.2 - 0.5 * sw; T.wR = -0.7;
+            T.sLx = -0.9; T.sLz = 1.0; T.eL = -0.6;
+            T.hLx = -1.4; T.kL = 1.8; T.hRx = -0.3; T.kR = 1.2; T.lean = 0.15 * sw - 0.2 * g; ball = 'R';
+          } else if (st === 'windmill2') {
+            // Two-hand windmill: both arms carry the ball down, back and all the way over the top
+            T.sLx = T.sRx = lerp(-1.2, Math.PI + 0.1, g); T.eL = T.eR = -0.15; T.sLz = 0.15; T.sRz = -0.15;
+            T.hLx = T.hRx = -1.0; T.kL = T.kR = 1.7; T.lean = -0.1 + 0.2 * Math.sin(g * Math.PI); ball = 'over';
+          } else if (st === '360wm') {
+            // 360 windmill: full spin while the ball arm windmills over the top
+            spin = Math.PI * 2 * g;
+            T.sRx = lerp(-1.2, Math.PI + 0.1, g); T.eR = -0.1; T.sRz = -0.15;
+            T.sLx = -0.9; T.sLz = 1.0; T.eL = -0.5;
+            T.hLx = T.hRx = -0.9; T.kL = T.kR = 1.7; ball = 'R';
           } else {
             T.sLx = T.sRx = lerp(-1.5, -3.15, g); T.eL = T.eR = lerp(-1.3, -1.55, g); T.sLz = 0.2; T.sRz = -0.2;
             T.hLx = -0.9; T.kL = 1.5; T.hRx = -0.5; T.kR = 1.3; ball = 'over';
@@ -816,8 +887,10 @@ export class PlayerModel {
           // Slam through the rim
           T.sLx = T.sRx = -2.45; T.eL = T.eR = -0.1; T.sLz = 0.25; T.sRz = -0.25; T.lean = 0.35;
           T.hLx = -0.6; T.kL = 1.2; T.hRx = -0.3; T.kR = 1.0; T.wL = T.wR = 1.0;
-          if (st === 'windmill') { T.sRx = Math.PI + 0.75; T.sLx = -1.2; }
-          if (st === 'one' || st === 'tomahawk' || st === 'contact') { T.sLx = -1.2; T.sLz = 0.7; }
+          if (st === 'windmill' || st === '360wm') { T.sRx = Math.PI + 0.75; T.sLx = -1.2; }
+          if (st === 'windmill2') { T.sLx = T.sRx = Math.PI + 0.75; }
+          if (ONE_HAND[st]) { T.sLx = -1.2; T.sLz = 0.7; }
+          if (st === 'leaner') { T.side = -0.3; T.sLz = 1.4; }
           if (st === 'reverse') spin = Math.PI;
         }
         break;
@@ -825,8 +898,9 @@ export class PlayerModel {
       case 'hang': {
         const sw = Math.sin(time * 7);
         T.sLx = T.sRx = -3.05; T.eL = T.eR = -0.05; T.sLz = 0.25; T.sRz = -0.25;
-        if (p.dunkStyle === 'windmill') T.sRx = Math.PI * 2 - 3.05;
-        if (['one', 'tomahawk', 'contact'].includes(p.dunkStyle)) { T.sLx = -0.6; T.sLz = 0.6; T.eL = -0.4; }
+        if (p.dunkStyle === 'windmill' || p.dunkStyle === '360wm') T.sRx = Math.PI * 2 - 3.05;
+        if (p.dunkStyle === 'windmill2') T.sLx = T.sRx = Math.PI * 2 - 3.05;
+        if (ONE_HAND[p.dunkStyle] && p.dunkStyle !== 'windmill' && p.dunkStyle !== '360wm') { T.sLx = -0.6; T.sLz = 0.6; T.eL = -0.4; }
         const settle = Math.exp(-(p.actionT || 0) * 5);
         T.hLx = -0.35 + sw * 0.4 * (0.4 + settle); T.hRx = -0.2 - sw * 0.4 * (0.4 + settle); T.kL = 0.75; T.kR = 0.55; T.lean = 0.1 - settle * 0.25; T.headX = 0.15;
         T.fL = T.fR = 0.4; T.wL = T.wR = 0.4;
@@ -1103,7 +1177,7 @@ export class PlayerModel {
     if (act === 'dunk') {
       const rel = p.releaseAt ? p.releaseAt / p.actionDur : 0.58;
       const jf = p.jumpAtF ? p.jumpAtF / p.actionDur : 0.25;
-      const from = lerp(jf, rel, st === 'windmill' || st === 'btl' || st === '360' ? 0.72 : 0.4);
+      const from = lerp(jf, rel, FLASHY_DUNKS.includes(st) ? 0.72 : 0.4);
       if (k < rel) { w = ease(clamp01((k - from) / Math.max(0.01, rel - from))); hangY = 0.75; lift = 0.35; }
       else { w = 1 - clamp01((k - rel) / 0.3); hangY = 0.12; }
     } else if (act === 'hang') { w = 1; hangY = 0.06; }

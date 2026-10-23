@@ -1,5 +1,5 @@
 // Basketball match simulation: 5v5 full court, user controls one player (MyCareer style).
-import { DRIBBLE_STYLES, JUMPSHOTS, clamp, reachOf } from './data.js';
+import { DRIBBLE_STYLES, JUMPSHOTS, FLASHY_DUNKS, animProfile, clamp, reachOf } from './data.js';
 
 export const HOOP_X = 41.75;
 export const RIM_Y = 10;
@@ -46,6 +46,7 @@ export class Game {
       if (isUser && opts.boost) for (const k in r) r[k] = Math.min(99, r[k] + opts.boost);
       this.players.push({
         ...def, r, team: t, slot, idx: this.players.length, isUser,
+        anim: animProfile({ ...def, r }, isUser ? { dribble: opts.dribbleStyle, jumpshot: opts.jumpshot } : {}),
         pos: { x: 0, z: 0 }, vel: { x: 0, z: 0 }, y: 0, vy: 0, facing: 0,
         action: null, actionT: 0, actionDur: 0, stun: 0, hasBall: false, holding: false,
         dribblePhase: 0, dribbleHand: 'R', energy: 100, aiT: 0, aiTarget: null, spotT: 0, spot: null,
@@ -875,12 +876,19 @@ export class Game {
 
   // Better dunkers unlock more dunk styles
   pickDunk(p) {
-    const r = p.r.dunk;
-    const pool = [['one', 3], ['two', 3]];
-    if (r >= 60) pool.push(['tomahawk', 2], ['cockback', 2]);
+    const r = p.r.dunk, a = p.anim || {}, flair = a.dunkFlair || 0, pw = a.power || 0;
+    // Higher dunk ratings unlock flashier dunks; how a player dunks leans on their profile: high flyers
+    // go flashy, bigs and strong builds go power (two hands, tomahawks, cock-backs)
+    const pool = [['one', 3], ['two', 3 + pw * 5]];
+    if (r >= 60) pool.push(['tomahawk', 2 + pw * 3], ['cockback', 2 + pw * 3]);
     if (r >= 72) pool.push(['reverse', 2], ['clutch', 1.5]);
+    if (r >= 78) pool.push(['leaner', 1.5]);
     if (r >= 80) pool.push(['windmill', 2]);
-    if (r >= 88) pool.push(['360', 1.5], ['btl', 1]);
+    if (r >= 84) pool.push(['backscratch', 1.5]);
+    if (r >= 88) pool.push(['360', 1.5], ['btl', 1], ['cradle', 1.2]);
+    if (r >= 90) pool.push(['windmill2', 1.5]);
+    if (r >= 94 && p.r.vert >= 85) pool.push(['360wm', 1.2]);
+    for (const e of pool) if (FLASHY_DUNKS.includes(e[0]) || ['leaner', 'backscratch'].includes(e[0])) e[1] *= 0.5 + 2 * flair;
     // Going at a defender near the rim: contact dunk
     const h = this.hoopOf(p.team);
     // A defender between the dunker and the rim, near the basket
@@ -893,7 +901,7 @@ export class Game {
     });
     p.contactDef = null;
     if (def && r >= 62 && chance(0.4 + (r - 62) / 80)) { p.contactVar = Math.floor(Math.random() * 3); p.contactDef = def; return 'contact'; }
-    if (def) for (const e of pool) if (['windmill', '360', 'btl'].includes(e[0])) e[1] *= 0.2;
+    if (def) for (const e of pool) if (FLASHY_DUNKS.includes(e[0])) e[1] *= 0.2;
     let tot = pool.reduce((a, e) => a + e[1], 0), x = Math.random() * tot;
     for (const [k, w] of pool) { x -= w; if (x <= 0) return k; }
     return 'two';
@@ -912,7 +920,7 @@ export class Game {
     if (type === 'dunk') {
       p.dunkStyle = this.pickDunk(p);
       // Flashy dunks need more air time
-      p.extraHops = ['windmill', '360', 'btl'].includes(p.dunkStyle);
+      p.extraHops = FLASHY_DUNKS.includes(p.dunkStyle);
       // Long gathers from further out; release at the top of the jump with the hand over the rim
       const dh = len(p.pos.x - h.x, p.pos.z - h.z);
       // Take off early on long approaches so the dunker flies in from further out
@@ -1721,7 +1729,7 @@ export class Game {
       // Dribble
       if (p.hasBall && !p.holding) {
         const prev = p.dribblePhase;
-        p.dribblePhase = (p.dribblePhase + dt * (p.post ? 2.0 : sp > 8 ? 2.3 : 1.9)) % 1;
+        p.dribblePhase = (p.dribblePhase + dt * (p.post ? 2.0 : sp > 8 ? 2.3 : 1.9) * (p.anim ? p.anim.dribRate : 1)) % 1;
         if (prev < 0.5 && p.dribblePhase >= 0.5 && this.ball.state === 'held') this.emit('dribble', { p });
       }
     }

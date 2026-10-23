@@ -505,7 +505,7 @@ export class Game {
     const h = this.hoopOf(u.team);
     // Stick pulled away from the rim as you shoot: fadeaway
     const sm = input.move || { x: 0, z: 0 }, sml = len(sm.x, sm.z);
-    if (dh > 8 && sml > 0.5 && ((h.x - u.pos.x) * sm.x + (h.z - u.pos.z) * sm.z) / (dh * sml) < -0.6 && spd < 9) { this.startJumper(u, false, 'fade'); return; }
+    if (dh > 8 && sml > 0.5 && ((h.x - u.pos.x) * sm.x + (h.z - u.pos.z) * sm.z) / (dh * sml) < -0.6) { this.startJumper(u, false, 'fade'); return; }
     const toward = ((h.x - u.pos.x) * u.vel.x + (h.z - u.pos.z) * u.vel.z) / (dh * Math.max(1, spd));
     const canDunk = this.canDunk(u);
     const dr = this.dunkRange(u);
@@ -757,7 +757,7 @@ export class Game {
     // Shooting on the move: the shot comes out of how you're moving. Heading away from the rim is a running
     // fadeaway, sideways is a drifting jumper (shoulders square, body carrying across), attacking is a pull-up.
     const spd0 = len(p.vel.x, p.vel.z);
-    p.shotVel = null; p.driftSide = 0;
+    p.shotVel = null; p.driftSide = 0; p.takeoffVel = null;
     if (!ft && !fromPost && spd0 > 6 && (!style || style === 'fade')) {
       const h = this.hoopOf(p.team), hx = h.x - p.pos.x, hz = h.z - p.pos.z, hl = len(hx, hz) || 1;
       const along = (p.vel.x * hx + p.vel.z * hz) / (hl * spd0);
@@ -1695,20 +1695,26 @@ export class Game {
           p.vel.x = d > 0.2 ? dx / d * s : 0; p.vel.z = d > 0.2 ? dz / d * s : 0;
         } else if (p.action === 'hang') { p.vel.x = p.vel.z = 0; }
         else if (p.action === 'shoot' && !p.ft && (p.shotStyle === 'fade' || p.shotVel)) {
-          // Fades drift back off the defender; moving shots carry their momentum through the air
-          // (a pull-up mostly stops, a drift or a running fade keeps going until the landing)
-          let vx = 0, vz = 0;
-          if (p.shotStyle === 'fade') {
-            const h = this.hoopOf(p.team), hx = p.pos.x - h.x, hz = p.pos.z - h.z, hl = len(hx, hz) || 1;
-            const f = Math.max(0, 1 - p.actionT * 1.5) * 6;
-            vx = hx / hl * f; vz = hz / hl * f;
-          }
-          if (p.shotVel) {
-            const pull = p.shotStyle === 'pullup';
-            const keep = Math.max(0, 1 - p.actionT / (pull ? 0.4 : 0.95)) * (pull ? 0.35 : 0.6);
-            vx += p.shotVel.x * keep; vz += p.shotVel.z * keep;
-          }
-          p.vel.x = vx; p.vel.z = vz;
+          // Moving shots and fades carry their momentum: the gather plants (a pull-up mostly stops, a drift
+          // or a fade keeps most of its speed, and a fade pushes back off the defender), then the take-off
+          // velocity carries all the way through the air with no steering until the landing.
+          if (!p.jumped) {
+            let tx = 0, tz = 0;
+            if (p.shotVel) {
+              const keep = p.shotStyle === 'pullup' ? 0.12 : p.shotStyle === 'fade' ? 0.3 : 0.38;
+              tx = p.shotVel.x * keep; tz = p.shotVel.z * keep;
+            }
+            if (p.shotStyle === 'fade') {
+              const h = this.hoopOf(p.team), hx = p.pos.x - h.x, hz = p.pos.z - h.z, hl = len(hx, hz) || 1;
+              tx += hx / hl * 4; tz += hz / hl * 4;
+            }
+            const k = 1 - Math.exp(-12 * dt);
+            p.vel.x += (tx - p.vel.x) * k; p.vel.z += (tz - p.vel.z) * k;
+            p.takeoffVel = { x: p.vel.x, z: p.vel.z };
+          } else if (p.y > 0 || p.vy > 0) {
+            const tv = p.takeoffVel || p.vel, drag = Math.exp(-0.25 * dt);
+            p.vel.x = tv.x; p.vel.z = tv.z; tv.x *= drag; tv.z *= drag;
+          } else { const dec = Math.exp(-9 * dt); p.vel.x *= dec; p.vel.z *= dec; } // landed: stick it
         }
         else { const dec = Math.exp(-6 * dt); p.vel.x *= dec; p.vel.z *= dec; }
       } else {

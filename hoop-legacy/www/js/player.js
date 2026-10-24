@@ -1175,75 +1175,91 @@ export class PlayerModel {
       }
       case 'posterfall':
       case 'fall': {
-        // Falls are done with the legs and hips (the body drops as the legs go out from under it), never by
-        // tipping the whole body over from the feet: buckle, sit down hard, stay down a beat, get back up.
+        // Falls: knocked off balance, butt down onto the floor (knees up and feet planted, or legs out
+        // straight), a beat on the floor, then a real get-up: tuck the feet in, push up through a squat, stand.
+        // (Knee flexion folds the shin down, so a planted foot needs the thigh angled up past horizontal.)
         const fv = p.fallVar || 0, post = act === 'posterfall';
         const sd = (p.idx % 2) ? 1 : -1;
-        const upAt = post ? 0.7 : 0.62;
-        // Get up: roll forward over the feet, tuck them under, stand
-        const getUp = (g) => {
-          const a = ease(clamp01(g / 0.5)), b2 = ease(clamp01((g - 0.45) / 0.55));
-          T.lean = lerp(lerp(T.lean, 0.65, a), 0.12, b2);
-          T.hLx = lerp(lerp(T.hLx, -1.45, a), 0, b2); T.hRx = lerp(lerp(T.hRx, -1.3, a), 0, b2);
-          T.kL = lerp(lerp(T.kL, 1.9, a), 0.2, b2); T.kR = lerp(lerp(T.kR, 1.8, a), 0.2, b2);
-          T.hLz = lerp(T.hLz, 0.05, a); T.hRz = lerp(T.hRz, -0.05, a); T.tilt = lerp(T.tilt, 0, a);
-          T.sLx = lerp(T.sLx, -0.6, a); T.sRx = lerp(T.sRx, -0.6, a); T.sLz = lerp(T.sLz, 0.4, a); T.sRz = lerp(T.sRz, -0.4, a);
-          T.eL = T.eR = -0.6; T.headX = lerp(T.headX, -0.1, a);
-          T.sit = T.sit * (1 - ease(clamp01(g / 0.6)));
-        };
+        const upAt = post ? 0.66 : 0.58;
+        const KNEE_UP = [-2.2, 1.25], LEG_OUT = [-1.55, 0.12];
+        const legs = (l, r) => { T.hLx = l[0]; T.kL = l[1]; T.hRx = r[0]; T.kR = r[1]; };
+        const mixLegs = (l, r, t) => { T.hLx = lerp(T.hLx, l[0], t); T.kL = lerp(T.kL, l[1], t); T.hRx = lerp(T.hRx, r[0], t); T.kR = lerp(T.kR, r[1], t); };
         T.crouch = 0;
+        let down = 0; // how far onto the floor (drives the pelvis drop)
         if (!post && fv === 1) {
-          // Ankle breaker: drops to a knee with a hand on the floor
-          const d = ease(clamp01(k / 0.18));
-          T.hLx = lerp(0, -0.15, d); T.kL = lerp(0.3, 1.75, d); T.hRx = lerp(0, -1.4, d); T.kR = lerp(0.3, 2.1, d);
-          T.lean = 0.6 * d; T.headX = -0.4 * d;
-          if (sd > 0) { T.sRx = -0.7 * d; T.eR = -0.05; T.sRz = -0.15; T.sLz = 0.9; T.sLx = -0.4; }
-          else { T.sLx = -0.7 * d; T.eL = -0.05; T.sLz = 0.15; T.sRz = -0.9; T.sRx = -0.4; }
+          // Ankle breaker: legs give out, drops to a knee and a hand
+          down = 0;
+          const d = ease(clamp01(k / 0.2));
+          T.hLx = lerp(0, -0.1, d); T.kL = lerp(0.3, 1.7, d); T.hRx = lerp(0, -1.5, d); T.kR = lerp(0.3, 1.9, d);
+          T.lean = 0.55 * d; T.headX = -0.35 * d;
+          if (sd > 0) { T.sRx = -0.75 * d; T.eR = -0.05; T.sRz = -0.15; T.sLz = 0.9; T.sLx = -0.4; }
+          else { T.sLx = -0.75 * d; T.eL = -0.05; T.sLz = 0.15; T.sRz = -0.9; T.sRx = -0.4; }
         } else if (!post) {
-          // Ankle breaker: legs cross up, sits down hard, catches himself with a hand behind
-          const st = clamp01(k / 0.12), d = ease(clamp01((k - 0.1) / 0.14));
-          T.hLz = 0.3 * st * (1 - d); T.kL = 0.5; T.lean = -0.25 * st;
-          T.sLz = 1.2 * st; T.sRz = -1.0 * st; T.sLx = -0.8 * st;
-          T.hLx = lerp(T.hLx, -1.35, d); T.hRx = lerp(T.hRx, -1.25, d); T.kL = lerp(T.kL, 0.35, d); T.kR = lerp(0.3, 0.7, d);
-          T.lean = lerp(T.lean, -0.5, d); T.sit = d;
-          T.sLx = lerp(T.sLx, 1.0, d); T.sLz = lerp(T.sLz, 0.35, d); T.eL = -0.1;
-          T.sRx = lerp(T.sRx, -0.4, d); T.sRz = lerp(T.sRz, -1.1, d); T.eR = -0.5; T.headX = 0.2 * d;
+          // Ankle breaker: feet cross up, stumbles back and sits down hard, one hand behind
+          const st = ease(clamp01(k / 0.14)); down = ease(clamp01((k - 0.1) / 0.16));
+          T.hLz = 0.25 * st * (1 - down); T.lean = -0.3 * st; T.sLz = 1.1 * st; T.sRz = -0.9 * st; T.sLx = -0.6 * st;
+          mixLegs(KNEE_UP, LEG_OUT, down);
+          T.lean = lerp(T.lean, -0.45, down);
+          T.sLx = lerp(T.sLx, 0.9, down); T.sLz = lerp(T.sLz, 0.3, down); T.eL = -0.1;
+          T.sRx = lerp(T.sRx, -0.5, down); T.sRz = lerp(T.sRz, -0.9, down); T.eR = -0.6; T.headX = 0.15 * down;
         } else if (fv === 1) {
-          // Posterized: spun around and down onto his side, propped on a forearm
-          spin = sd * 1.2 * ease(clamp01(k / 0.2));
-          const d = ease(clamp01((k - 0.06) / 0.16));
-          T.hLx = -1.2 * d; T.kL = 1.0 * d + 0.2; T.hRx = -1.0 * d; T.kR = 1.3 * d + 0.2;
-          T.lean = -0.35 * d; T.tilt = sd * 0.6 * d; T.sit = 0.9 * d;
-          T.sLx = 0.4 * d; T.sLz = 0.15; T.eL = -1.4 * d; T.sRx = -0.6; T.sRz = -0.8; T.eR = -0.6; T.headX = 0.2;
+          // Posterized: spun half around and down onto a hip, propped on a forearm
+          spin = sd * 1.1 * ease(clamp01(k / 0.22));
+          down = ease(clamp01((k - 0.08) / 0.18));
+          mixLegs([-2.2, 1.35], [-2.1, 1.2], down); T.hLz = 0.15 * down; T.hRz = 0.15 * down;
+          T.lean = -0.25 * down; T.tilt = sd * 0.35 * down;
+          T.sLx = 0.5 * down; T.sLz = 0.25; T.eL = -1.2 * down; T.sRx = -0.6; T.sRz = -0.7; T.eR = -0.6; T.headX = 0.15;
         } else if (fv === 2) {
-          // Posterized: staggers back a couple of steps, sits, then goes flat on his back
-          const stag = clamp01(k / 0.22), step = Math.sin(stag * Math.PI * 2) * (1 - clamp01((k - 0.18) / 0.06));
-          const sit = ease(clamp01((k - 0.2) / 0.1)), flat = ease(clamp01((k - 0.3) / 0.12)) * (1 - ease(clamp01((k - 0.58) / 0.12)));
-          T.hLx = 0.45 * step; T.hRx = -0.45 * step; T.lean = -0.35 * stag * (1 - sit);
-          T.sLz = 1.1; T.sRz = -1.1; T.sLx = -1.2 * (1 - sit); T.sRx = -1.0 * (1 - sit);
-          T.hLx = lerp(T.hLx, -1.4, sit); T.hRx = lerp(T.hRx, -1.35, sit); T.kL = lerp(0.3, 0.4, sit); T.kR = lerp(0.3, 0.9, sit);
-          T.lean = lerp(lerp(T.lean, -0.55, sit), -1.35, flat); T.sit = sit;
-          T.sLz = lerp(T.sLz, 1.4, flat); T.sRz = lerp(T.sRz, -1.4, flat); T.sLx = lerp(T.sLx, 0.3, flat); T.sRx = lerp(T.sRx, 0.3, flat);
-          T.eL = T.eR = -0.3; T.headX = 0.3 * flat;
+          // Posterized: two stumbling steps back, sits, then lies back flat with arms out
+          const stag = clamp01(k / 0.22), step = Math.sin(stag * Math.PI * 2) * (1 - clamp01((k - 0.16) / 0.08));
+          down = ease(clamp01((k - 0.18) / 0.12));
+          const flat = ease(clamp01((k - 0.3) / 0.14)) * (1 - ease(clamp01((k - upAt + 0.12) / 0.12)));
+          T.hLx = 0.4 * step; T.hRx = -0.4 * step; T.kL = T.kR = 0.35; T.lean = -0.3 * stag;
+          T.sLz = 1.0; T.sRz = -1.0; T.sLx = -1.0 * (1 - down); T.sRx = -0.9 * (1 - down);
+          mixLegs(KNEE_UP, LEG_OUT, down);
+          mixLegs(LEG_OUT, LEG_OUT, flat);
+          T.lean = lerp(lerp(T.lean, -0.55, down), -1.25, flat);
+          T.sLz = lerp(T.sLz, 1.35, flat); T.sRz = lerp(T.sRz, -1.35, flat); T.sLx = lerp(T.sLx, 0.2, flat); T.sRx = lerp(T.sRx, 0.2, flat);
+          T.eL = T.eR = -0.3; T.headX = 0.35 * flat;
         } else {
-          // Posterized: thrown back onto his backside, propped up on his hands looking up at the dunker
-          const fly = clamp01(k / 0.1), d = ease(clamp01((k - 0.08) / 0.12));
-          T.lean = -0.5 * fly; T.sLx = -2.3 * fly; T.sRx = -2.0 * fly; T.sLz = 0.6 * fly; T.sRz = -0.6 * fly; T.hLx = 0.4 * fly * (1 - d);
-          T.hLx = lerp(T.hLx, -1.4, d); T.hRx = lerp(0, -1.35, d); T.hLz = 0.3 * d; T.hRz = -0.3 * d; T.kL = 0.3 + 0.1 * d; T.kR = 0.3 + 0.3 * d;
-          T.lean = lerp(T.lean, -0.75, d); T.sit = d;
-          T.sLx = lerp(T.sLx, 1.0, d); T.sRx = lerp(T.sRx, 1.0, d); T.sLz = lerp(T.sLz, 0.35, d); T.sRz = lerp(T.sRz, -0.35, d);
-          T.eL = T.eR = -0.1; T.headX = 0.3 * d;
+          // Posterized: thrown back onto his backside, propped up on both hands, looking up at the dunker
+          const fly = ease(clamp01(k / 0.1)); down = ease(clamp01((k - 0.07) / 0.14));
+          T.lean = -0.45 * fly; T.sLx = -2.2 * fly; T.sRx = -1.9 * fly; T.sLz = 0.6 * fly; T.sRz = -0.6 * fly; T.hLx = 0.35 * fly;
+          mixLegs(KNEE_UP, [-2.15, 1.3], down); T.hLz = 0.28 * down; T.hRz = -0.28 * down;
+          T.lean = lerp(T.lean, -0.7, down);
+          T.sLx = lerp(T.sLx, 0.85, down); T.sRx = lerp(T.sRx, 0.85, down); T.sLz = lerp(T.sLz, 0.3, down); T.sRz = lerp(T.sRz, -0.3, down);
+          T.eL = T.eR = -0.15; T.headX = 0.3 * down;
         }
-        if (k > upAt) getUp((k - upAt) / (1 - upAt));
+        T.sit = down;
+        if (k > upAt) {
+          // Get up: (1) sit up and tuck the feet in under him, hand pushing off the floor,
+          // (2) push up into a squat, (3) stand up tall
+          const g = (k - upAt) / (1 - upAt);
+          const a1 = ease(clamp01(g / 0.38)), a2 = ease(clamp01((g - 0.3) / 0.38)), a3 = ease(clamp01((g - 0.62) / 0.38));
+          T.tilt = lerp(T.tilt, 0, a1); T.hLz = lerp(T.hLz, 0.12, a1); T.hRz = lerp(T.hRz, -0.12, a1);
+          mixLegs([-2.25, 2.2], [-2.15, 2.1], a1);
+          T.lean = lerp(T.lean, 0.45, a1);
+          T.sLx = lerp(T.sLx, -0.3, a1); T.sRx = lerp(T.sRx, 0.4, a1); T.sLz = lerp(T.sLz, 0.35, a1); T.sRz = lerp(T.sRz, -0.3, a1);
+          T.eL = lerp(T.eL, -0.4, a1); T.eR = lerp(T.eR, -0.1, a1); T.headX = lerp(T.headX, -0.2, a1);
+          T.sit = T.sit * (1 - a2);
+          mixLegs([-1.3, 1.9], [-1.25, 1.8], a2); T.lean = lerp(T.lean, 0.5, a2);
+          mixLegs([0, 0.18], [0, 0.18], a3); T.lean = lerp(T.lean, 0.1, a3);
+          T.sLx = lerp(T.sLx, 0.1, a3); T.sRx = lerp(T.sRx, 0.1, a3); T.sLz = lerp(T.sLz, 0.12, a3); T.sRz = lerp(T.sRz, -0.12, a3);
+          T.eL = lerp(T.eL, -0.3, a3); T.eR = lerp(T.eR, -0.3, a3); T.headX = lerp(T.headX, 0, a3); T.hLz = lerp(T.hLz, 0.04, a3); T.hRz = lerp(T.hRz, -0.04, a3);
+        }
         break;
       }
       case 'stepover': {
-        // Stepping over the guy he just dunked on: two big, high steps, looking down at him
-        const ph2 = Math.sin(k * Math.PI * 2.2);
-        T.hLx = -1.15 * Math.max(0, ph2) + 0.35 * Math.max(0, -ph2); T.hRx = -1.15 * Math.max(0, -ph2) + 0.35 * Math.max(0, ph2);
-        T.kL = 0.2 + 1.3 * Math.max(0, ph2); T.kR = 0.2 + 1.3 * Math.max(0, -ph2);
-        T.lean = 0.12; T.headX = 0.6; T.sLz = 0.3; T.sRz = -0.3; T.sLx = 0.25 * ph2; T.sRx = -0.25 * ph2; T.eL = T.eR = -0.5;
-        T.bob = 0.12 * Math.abs(ph2);
+        // Step over the guy on the floor: lead leg lifts high and over, then the trail leg, then stand over him
+        // and stare down
+        const bump = (c, w) => Math.max(0, 1 - Math.abs(k - c) / w);
+        const s1 = ease(bump(0.16, 0.16)), s2 = ease(bump(0.44, 0.16)), stand = ease(clamp01((k - 0.58) / 0.12));
+        T.hRx = -1.35 * s1 + 0.25 * s2; T.kR = 0.15 + 1.55 * s1;
+        T.hLx = -1.25 * s2 + 0.2 * s1; T.kL = 0.15 + 1.6 * s2;
+        T.hLz = 0.06 + 0.08 * stand; T.hRz = -0.06 - 0.08 * stand;
+        T.lean = 0.18 * (1 - stand) - 0.06 * stand; T.headX = 0.55 + 0.15 * stand;
+        T.sLz = 0.28; T.sRz = -0.28; T.sLx = 0.15 * s1 - 0.15 * s2; T.sRx = -0.15 * s1 + 0.15 * s2; T.eL = T.eR = -0.45;
+        T.bob = 0.1 * (s1 + s2);
         break;
       }
       case 'celebrate': {
@@ -1301,7 +1317,7 @@ export class PlayerModel {
     const plant = (this.thigh + this.shin - Math.max(depth(hL, kL, P.hLz), depth(hR, kR, P.hRz))) * lerp(1, 0.45, runAmt) * (1 - air);
     this.body.position.y = yJump + P.bob - plant + this.yOff;
     // Sat / lying on the floor: the pelvis comes all the way down
-    if (P.sit > 0.001) this.body.position.y = lerp(this.body.position.y, 0.45 - this.legLen, Math.min(1, P.sit));
+    if (P.sit > 0.001) this.body.position.y = lerp(this.body.position.y, 0.55 - this.legLen, Math.min(1, P.sit));
     this.body.rotation.set(P.roll, P.yaw, P.side);
     this.pelvis.position.y = this.legLen;
     this.torso.rotation.set(P.lean, P.twist, P.tilt);
@@ -1321,6 +1337,13 @@ export class PlayerModel {
     this.legL.an.rotation.x = lerp(-(hL + kL), 0.5, air) + P.fL;
     this.legR.an.rotation.x = lerp(-(hR + kR), 0.5, air) + P.fR;
     this.root.updateMatrixWorld(true);
+    // Floor guard while going down / getting up: nothing (feet, knees, shoulders, head) goes through the floor
+    if (P.sit > 0.01 || act === 'fall' || act === 'posterfall') {
+      let lo = 9;
+      for (const o of [this.legL.an, this.legR.an, this.legL.kn, this.legR.kn, this.armL.sh, this.armR.sh, this.head]) { o.getWorldPosition(this._v); lo = Math.min(lo, this._v.y); }
+      const want = 0.22;
+      if (lo < want) { this.body.position.y += want - lo; this.root.updateMatrixWorld(true); }
+    }
     this.rimReach(p, act, k, dt);
     this.blockReach(p, game, act);
     const sh = game && game.ball && game.ball.state === 'shot' && game.ball.shot;
@@ -1374,7 +1397,7 @@ export class PlayerModel {
       const from = lerp(jf, rel, FLASHY_DUNKS.includes(st) ? 0.72 : 0.4);
       if (k < rel) { w = ease(clamp01((k - from) / Math.max(0.01, rel - from))); hangY = 0.75; lift = 0.35; }
       else { w = 1 - clamp01((k - rel) / 0.3); hangY = 0.12; }
-    } else if (act === 'hang') { w = 1; hangY = 0.06; }
+    } else if (act === 'hang') { w = st === 'contact' ? 1 - clamp01(((p.actionT || 0) - 0.04) / 0.14) : 1; hangY = 0.06; }
     // First instant of the hang: the hand(s) finish pushing the ball down through the middle of the rim
     const slam = act === 'hang' ? 1 - clamp01(((p.actionT || 0) - 0.08) / 0.1) : 0;
     const prevOff = this.yOff;

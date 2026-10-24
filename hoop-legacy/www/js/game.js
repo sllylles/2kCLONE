@@ -939,7 +939,7 @@ export class Game {
   // Dunk jump: rise until the hand clears the rim, higher for bouncier players and flashy dunks
   dunkApex(p, flashy) {
     const need = RIM_Y + 1.0 - reachOf(p.heightFt);
-    const over = p.dunkStyle === 'contact' && p.contactVar === 1 ? 1.1 : 0; // jumping over the defender
+    const over = p.dunkStyle === 'contact' && p.contactVar === 1 ? 0.75 : 0; // jumping over the defender
     return Math.max(3.0, need) + clamp((p.r.vert - 55) / 40, 0, 1) * 0.9 + (flashy ? 0.6 : 0) + over;
   }
 
@@ -1689,9 +1689,9 @@ export class Game {
             const dx = v.pos.x - p.pos.x, dz = v.pos.z - p.pos.z, d = len(dx, dz);
             if (v.action === 'posterfall' && v.fallVar !== 1 && v.actionT < v.actionDur * 0.6 && d < 7) {
               // Walk right over him: past his body and a couple of steps beyond, looking down at him
-              const go = d + 2.6;
-              this.setAction(p, 'stepover', 1.15);
-              p.moveVel = { x: dx / (d || 1) * go / 1.15, z: dz / (d || 1) * go / 1.15 };
+              const go = d + 1.2, T = 1.6;
+              this.setAction(p, 'stepover', T);
+              p.moveVel = { x: dx / (d || 1) * go / T, z: dz / (d || 1) * go / T };
               p.facing = Math.atan2(dx, dz); p.stepVictim = v;
               this.emit('stepover', { p, def: v });
             }
@@ -1787,7 +1787,11 @@ export class Game {
           const s = Math.min(26, d / k);
           p.vel.x = d > 0.2 ? dx / d * s : 0; p.vel.z = d > 0.2 ? dz / d * s : 0;
         } else if (p.action === 'hang') { p.vel.x = p.vel.z = 0; }
-        else if (p.action === 'stepover' && p.moveVel) { p.vel.x = p.moveVel.x; p.vel.z = p.moveVel.z; }
+        else if (p.action === 'stepover' && p.moveVel) {
+          // Moves only while stepping (first 60%), then stands over him
+          const f = p.actionT / p.actionDur < 0.6 ? 1 / 0.6 : 0;
+          p.vel.x = p.moveVel.x * f; p.vel.z = p.moveVel.z * f;
+        }
         else if (p.action === 'shoot' && !p.ft && (p.shotStyle === 'fade' || p.shotVel)) {
           // Moving shots and fades carry their momentum: the gather plants (a pull-up mostly stops, a drift
           // or a fade keeps most of its speed, and a fade pushes back off the defender), then the take-off
@@ -1902,16 +1906,22 @@ export class Game {
           // Hang on the rim if made
           this.resolveShot(p, 'dunk');
           if (this.ball.shot && this.ball.shot.make) {
-            this.setAction(p, 'hang', 0.65);
-            // Hands on the rim: pull down from the top of the jump into a straight-arm hang
-            p.hangY = RIM_Y + 0.15 - reachOf(p.heightFt) * 0.985;
-            p.y = Math.max(p.y, p.hangY);
+            if (p.dunkStyle === 'contact') {
+              // Through the defender: no hanging around up there, slam it through and come straight down
+              this.setAction(p, 'hang', 0.24);
+              p.hangY = Math.max(0.4, p.y - 1.6);
+            } else {
+              this.setAction(p, 'hang', 0.65);
+              // Hands on the rim: pull down from the top of the jump into a straight-arm hang
+              p.hangY = RIM_Y + 0.15 - reachOf(p.heightFt) * 0.985;
+              p.y = Math.max(p.y, p.hangY);
+            }
             this.emit('dunk', { p }); this.bc(p, 'posterizer');
           }
         } else this.resolveShot(p, 'layup');
       }
     }
-    if (a === 'hang' && p.actionT >= p.actionDur) { this.setAction(p, 'land', 0.5); p.released = true; p.vy = -2; p.y = Math.max(0.01, p.y); }
+    if (a === 'hang' && p.actionT >= p.actionDur) { this.setAction(p, 'land', 0.5); p.released = true; p.vy = p.dunkStyle === 'contact' ? -9 : -2; p.y = Math.max(0.01, p.y); }
   }
 
   inPaint(p, team) {

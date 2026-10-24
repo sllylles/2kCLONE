@@ -189,6 +189,59 @@ export function animOpts(c) {
 }
 export function newAnimCount(c) { return c.anims ? c.anims.recent.filter(r => !r.seen).length : 0; }
 
+// ---------- Lifetime goals ----------
+// Your games are shorter than real ones, so stats are scaled to full NBA games (12-minute quarters) and, for
+// career totals, full 82-game seasons before they're compared with the legends. Career totals count NBA games.
+export const LIFE_GOALS = [
+  { id: 'g_pts', label: 'Points in a game', kind: 'game', stat: 'pts', tiers: [[40], [60], [81, 'Kobe Bryant'], [100, 'Wilt Chamberlain']] },
+  { id: 'g_reb', label: 'Rebounds in a game', kind: 'game', stat: 'reb', tiers: [[20], [30], [55, 'Wilt Chamberlain']] },
+  { id: 'g_ast', label: 'Assists in a game', kind: 'game', stat: 'ast', tiers: [[15], [20], [30, 'Scott Skiles']] },
+  { id: 'g_tpm', label: 'Threes in a game', kind: 'game', stat: 'tpm', tiers: [[7], [10], [14, 'Klay Thompson']] },
+  { id: 'g_blk', label: 'Blocks in a game', kind: 'game', stat: 'blk', tiers: [[6], [10], [17, 'Elmore Smith']] },
+  { id: 'c_pts', label: 'Career points', kind: 'career', stat: 'pts', tiers: [[5000], [15000], [32292, 'Michael Jordan'], [38387, 'Kareem Abdul-Jabbar']] },
+  { id: 'c_reb', label: 'Career rebounds', kind: 'career', stat: 'reb', tiers: [[3000], [10000], [23924, 'Wilt Chamberlain']] },
+  { id: 'c_ast', label: 'Career assists', kind: 'career', stat: 'ast', tiers: [[2000], [8000], [15806, 'John Stockton']] },
+  { id: 'c_tpm', label: 'Career threes', kind: 'career', stat: 'tpm', tiers: [[500], [2000], [3747, 'Ray Allen → Stephen Curry']] },
+  { id: 'c_blk', label: 'Career blocks', kind: 'career', stat: 'blk', tiers: [[500], [2000], [3830, 'Hakeem Olajuwon']] },
+  { id: 'c_stl', label: 'Career steals', kind: 'career', stat: 'stl', tiers: [[500], [1500], [3265, 'John Stockton']] },
+  { id: 'rings', label: 'Championship rings', kind: 'count', stat: 'rings', tiers: [[1], [3], [6, 'Michael Jordan'], [11, 'Bill Russell']] },
+  { id: 'fmvp', label: 'Finals MVPs', kind: 'count', stat: 'fmvp', tiers: [[1], [3, 'Kevin Durant'], [6, 'Michael Jordan']] },
+];
+function lifeValue(c, g) {
+  const L = c.life || {};
+  if (g.kind === 'game') return Math.round((L.best || {})[g.stat] || 0);
+  if (g.kind === 'career') return Math.round((L.career || {})[g.stat] || 0);
+  if (g.stat === 'rings') return c.awards.filter(a => /NBA Champion$/.test(a)).length;
+  return c.awards.filter(a => /Finals MVP/.test(a)).length;
+}
+export function lifeGoals(c) {
+  return LIFE_GOALS.map(g => {
+    const v = lifeValue(c, g), done = (c.life && c.life.done && c.life.done[g.id]) || 0;
+    return { ...g, value: v, done, next: g.tiers[done] || null };
+  });
+}
+// Record a game and pay out any goal tiers just reached. Returns [{label, n, who, ap, vc}]
+function updateLifeGoals(c, s, scale) {
+  c.life = c.life || { best: {}, career: {}, done: {} };
+  const L = c.life, perGame = 12 / Math.max(1, scale.q || 3), perSeason = 82 / Math.max(1, scale.season || 29);
+  for (const k of ['pts', 'reb', 'ast', 'stl', 'blk', 'tpm']) {
+    L.best[k] = Math.max(L.best[k] || 0, (s[k] || 0) * perGame);
+    if (c.nba && (c.phase === 'nba' || c.phase === 'playoffs')) L.career[k] = (L.career[k] || 0) + (s[k] || 0) * perGame * perSeason;
+  }
+  const out = [];
+  for (const g of LIFE_GOALS) {
+    const v = lifeValue(c, g);
+    while ((L.done[g.id] || 0) < g.tiers.length && v >= g.tiers[L.done[g.id] || 0][0]) {
+      const t = L.done[g.id] || 0, [n, who] = g.tiers[t];
+      const legend = !!who, ap = legend ? 25 : 8 + t * 4, vc = legend ? 5000 : 800 + t * 600;
+      c.ap += ap; c.vc = (c.vc || 0) + vc;
+      out.push({ label: g.label, n, who, ap, vc });
+      L.done[g.id] = t + 1;
+    }
+  }
+  return out;
+}
+
 // ---------- Game tasks ----------
 const TASK_POOL = {
   pts: { text: n => `Score ${n}+ points`, stat: s => s.pts, base: m => Math.max(4, Math.round(m * 0.22)) },
@@ -620,6 +673,7 @@ export function applyResult(c, info, res) {
     else if (sr.wins[1] >= need) advancePlayoffs(c, out, false);
     else out.notes.push(`Series: ${sr.wins[0]}-${sr.wins[1]}`);
   }
+  out.goals = updateLifeGoals(c, s, res.scale || {});
   if (c.anims) out.newAnims = checkAnimUnlocks(c);
   return out;
 }

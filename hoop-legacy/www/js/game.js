@@ -112,7 +112,7 @@ export class Game {
     return { q: best, d: bd };
   }
   maxSpeed(p) {
-    let s = 15 + p.r.speed * 0.07;
+    let s = 17.2 + p.r.speed * 0.048; // 36 speed ~18.9, 90 ~21.5
     if (p.hasBall) s *= 0.88 + p.r.handle * 0.0012;
     if (p.isUser && p.energy < 25) s *= 0.85;
     if (p.intenseD) s *= 0.88;
@@ -672,7 +672,20 @@ export class Game {
     let kind, dx = gesture.x, dz = gesture.z;
     const dl = len(dx, dz) || 1; dx /= dl; dz /= dl;
     const along = dx * hx + dz * hz;
-    if (gesture.type === 'double') { kind = 'spin'; dx = hx; dz = hz; }
+    // Driving into the paint: stick left/right = euro step to that side, stick up = floater
+    if (gesture.type === 'swipe' && p.hasBall && !p.holding) {
+      const dh0 = this.distHoop(p), sp0 = len(p.vel.x, p.vel.z);
+      const toward0 = ((h.x - p.pos.x) * p.vel.x + (h.z - p.pos.z) * p.vel.z) / ((dh0 || 1) * Math.max(1, sp0));
+      if (dh0 < 17 && dh0 > 4 && sp0 > 6.5 && toward0 > 0.35) {
+        if (along > 0.55 && dh0 > 5.5) { this.startFloater(p); return; }
+        if (Math.abs(along) < 0.6) { this.startEuro(p, (hx * dz - hz * dx) > 0 ? 1 : -1); return; }
+      }
+    }
+    if (gesture.type === 'double') {
+      // No spin spam: one spin, then it has to cool down (and a spin can't chain straight into another)
+      if (this.time - (p.lastSpin || -9) < 1.3 || p.action === 'spin') return;
+      kind = 'spin'; dx = hx; dz = hz; p.lastSpin = this.time;
+    }
     else if (along > 0.65) kind = 'hesi';
     else if (along < -0.6) kind = 'stepback';
     else {
@@ -893,7 +906,9 @@ export class Game {
     w *= 1 + this.bt(p, 'greenMachine') * 0.06 * Math.min(this.greenStreak, 3);
     if (p.isUser) w *= 1 - this.heat * 0.3;
     if (this.toIs(p, 'shooting')) w *= 1.6;
-    return w > 0 ? Math.max(0.012, w) : 0;
+    // Post fades and hooks are a skill: tiny window for low ratings, normal for good post scorers
+    if (p.shotStyle === 'fade' || p.shotStyle === 'hook') w *= clamp((rating - 35) / 50, 0.2, 1);
+    return w > 0 ? Math.max(p.shotStyle === 'fade' || p.shotStyle === 'hook' ? 0.006 : 0.012, w) : 0;
   }
   // No greens from way downtown: the window closes over a few feet past the player's range
   greenRange(p) {
@@ -907,7 +922,7 @@ export class Game {
     const t = p.meter;
     const err = t - 1;
     const rating = this.shotRating(p);
-    const w = p.isUser ? this.meterWindow(p) : (0.05 + rating / 99 * 0.06) * this.js.window * (this.toIs(p, 'shooting') ? 1.6 : 1);
+    const w = p.isUser ? this.meterWindow(p) : (0.05 + rating / 99 * 0.06) * this.js.window * (this.toIs(p, 'shooting') ? 1.6 : 1) * (p.shotStyle === 'fade' || p.shotStyle === 'hook' ? clamp((rating - 35) / 50, 0.2, 1) : 1);
     let q;
     const ae = Math.abs(err);
     if (w > 0 && ae <= w) q = 'perfect';
@@ -931,7 +946,8 @@ export class Game {
     this.resolveShot(p, 'layup', q);
   }
 
-  canDunk(p) { return p.r.dunk >= 55 && p.r.vert + p.r.strength * 0.4 >= 70; }
+  // Dunk tiers: 65 basic dunks, 70 hanging, 75 slight contact, 85 contact (knockdowns), 90+ elite contact
+  canDunk(p) { return p.r.dunk >= 65 && p.r.vert + p.r.strength * 0.4 >= 70; }
   // How far out a player can take off for a dunk on the move (feet from the rim)
   dunkRange(p) {
     return 11.5 + clamp((p.r.dunk - 55) / 40, 0, 1) * 4 + clamp((p.r.vert - 55) / 40, 0, 1) * 3 + (p.heightFt - 6.5) * 0.8 + (this.toIs(p, 'finishing') ? 1.5 : 0);
@@ -954,13 +970,11 @@ export class Game {
     // Higher dunk ratings unlock flashier dunks; how a player dunks leans on their profile: high flyers
     // go flashy, bigs and strong builds go power (two hands, tomahawks, cock-backs)
     const pool = [['one', 3], ['two', 3 + pw * 5]];
-    if (r >= 60) pool.push(['tomahawk', 2 + pw * 3], ['cockback', 2 + pw * 3]);
-    if (r >= 72) pool.push(['reverse', 2], ['clutch', 1.5]);
-    if (r >= 78) pool.push(['leaner', 1.5]);
-    if (r >= 80) pool.push(['windmill', 2]);
-    if (r >= 84) pool.push(['backscratch', 1.5]);
-    if (r >= 88) pool.push(['360', 1.5], ['btl', 1], ['cradle', 1.2]);
-    if (r >= 90) pool.push(['windmill2', 1.5]);
+    if (r >= 68) pool.push(['tomahawk', 2 + pw * 3], ['cockback', 2 + pw * 3]);
+    if (r >= 75) pool.push(['reverse', 2], ['clutch', 1.5], ['leaner', 1.2]);
+    if (r >= 82) pool.push(['windmill', 2], ['backscratch', 1.5]);
+    // 90+: the super eccentric ones
+    if (r >= 90) pool.push(['360', 1.5], ['btl', 1], ['cradle', 1.2], ['windmill2', 1.5]);
     if (r >= 94 && p.r.vert >= 85) pool.push(['360wm', 1.2]);
     for (const e of pool) if (FLASHY_DUNKS.includes(e[0]) || ['leaner', 'backscratch'].includes(e[0])) e[1] *= 0.5 + 2 * flair;
     // Going at a defender near the rim: contact dunk
@@ -974,15 +988,48 @@ export class Game {
       return len(q.pos.x - h.x, q.pos.z - h.z) < 8 && along > -1 && along < hl + 2 && perp < 4.5;
     });
     p.contactDef = null;
-    if (def && r >= 62 && chance(0.4 + (r - 62) / 80 + (fin ? 0.25 : 0) + posterBoost)) { p.contactVar = Math.floor(Math.random() * 3); p.contactDef = def; return 'contact'; }
+    // Contact tiers: 75 slight contact (through his arm, he just gets bumped), 85 contact dunks that put him on
+    // the floor, 90+ elite: going over the top of him and stepping over
+    p.contactLite = false;
+    if (def && r >= 75 && chance(0.35 + (r - 75) / 70 + (fin ? 0.25 : 0) + posterBoost)) {
+      if (r < 85) { p.contactVar = 2; p.contactLite = true; }
+      else if (r < 90) p.contactVar = chance(0.5) ? 0 : 2;
+      else p.contactVar = chance(0.45) ? 1 : chance(0.5) ? 0 : 2;
+      p.contactDef = def; return 'contact';
+    }
     if (def) for (const e of pool) if (FLASHY_DUNKS.includes(e[0])) e[1] *= 0.2;
     let tot = pool.reduce((a, e) => a + e[1], 0), x = Math.random() * tot;
     for (const [k, w] of pool) { x -= w; if (x <= 0) return k; }
     return 'two';
   }
 
+  // Euro step: a short step one way, then a long step to the side you chose, then into the layup
+  startEuro(p, side) {
+    this.setAction(p, 'euro', 0.5);
+    p.euroSide = side; p.holding = false; p.post = false;
+    const h = this.hoopOf(p.team), hx = h.x - p.pos.x, hz = h.z - p.pos.z, hl = len(hx, hz) || 1;
+    p.euroDir = { x: hx / hl, z: hz / hl };
+    this.emit('move', { kind: 'euro', p });
+    // The on-ball defender bites on the first step
+    const { q: def, d } = this.nearestDefender(p);
+    if (def && d < 6 && def.stun <= 0 && def.y === 0 && chance(0.25 + (p.r.layup - def.r.perD) / 120 + (this.toIs(p, 'playmaking') ? 0.15 : 0))) {
+      this.setAction(def, 'stumble', 0.6); def.stun = 0.6; this.emit('beat', { p, def });
+    }
+  }
+  // Floater: one-handed, released early on the way up with a high arc over the rim protector
+  startFloater(p) {
+    this.startFinish(p, 'layup');
+    p.layupStyle = 'floater';
+    p.releaseAt = 0.36;
+    const h = this.hoopOf(p.team), hx = h.x - p.pos.x, hz = h.z - p.pos.z, hl = len(hx, hz) || 1;
+    const go = Math.min(2.2, Math.max(0, hl - 5.5));
+    p.finishPt = { x: p.pos.x + hx / hl * go, z: p.pos.z + hz / hl * go };
+    if (p.isUser) { p.meterOn = true; p.meter = 0; this.emit('meterStart', { p }); }
+  }
+
   startFinish(p, type) {
     this.setAction(p, type, type === 'dunk' ? 1.1 : 0.8);
+    p.layupStyle = null;
     p.releaseAt = type === 'dunk' ? 0.64 : 0.44;
     p.meterOn = false;
     p.extraHops = false;
@@ -1089,6 +1136,7 @@ export class Game {
       const legs = clamp((p.r.vert + p.r.strength) / 2 - 50, 0, 40) / 400;
       prob = 0.88 + p.r.dunk / 99 * 0.1 + legs - dc * (0.32 - p.r.dunk / 99 * 0.12);
     }
+    else if (kind === 'layup' && p.layupStyle === 'floater') prob = (0.34 + p.r.close / 99 * 0.46) * (1 - 0.22 * c);
     else if (kind === 'layup') prob = (0.5 + p.r.layup / 99 * 0.42) * (1 - 0.4 * c * (this.toIs(p, 'finishing') ? 0.45 : 1) * (1 - this.bt(p, 'acrobat') * 0.12)) * (1 + this.bt(p, 'acrobat') * 0.03);
     else {
       let r = dh < 10 ? p.r.close : three ? p.r.three : p.r.mid;
@@ -1143,11 +1191,17 @@ export class Game {
       if (chance(fp)) foul = contester;
     }
     if (poster) {
-      contester.fallVar = p.dunkStyle === 'contact' && p.contactVar === 1 ? 0 : Math.floor(Math.random() * 3);
       contester.duckUntil = 0;
-      this.knock(contester, p.pos, 13, 'posterfall', 2.5, true);
-      // Sometimes the dunker steps over the guy he just dunked on
-      p.stepOver = chance(0.4) ? contester : null;
+      if (p.contactLite) {
+        // Slight contact: he gets bumped out of the way, not put on the floor
+        this.knock(contester, p.pos, 6, 'stumble', 0.7, true);
+        p.stepOver = null;
+      } else {
+        contester.fallVar = p.dunkStyle === 'contact' && p.contactVar === 1 ? 0 : Math.floor(Math.random() * 3);
+        this.knock(contester, p.pos, 13, 'posterfall', 2.5, true);
+        // Elite (90+) dunkers sometimes step over the guy they just dunked on
+        p.stepOver = p.r.dunk >= 90 && chance(0.45) ? contester : null;
+      }
       this.emit('poster', { p, def: contester }); this.bc(p, 'posterizer', 2);
       if (p.isUser) this.addGrade(2, 'Posterized');
     } else if (foul) {
@@ -1173,7 +1227,7 @@ export class Game {
     b.state = 'shot';
     b.lastTouch = p.team;
     const dist = len(h.x - start.x, h.z - start.z);
-    let T = kind === 'dunk' ? 0.12 : kind === 'layup' ? 0.5 : 0.75 + dist * 0.022 + (this.js === JUMPSHOTS.higharc ? 0.1 : 0);
+    let T = kind === 'dunk' ? 0.12 : kind === 'layup' ? (p.layupStyle === 'floater' ? 0.95 : 0.5) : 0.75 + dist * 0.022 + (this.js === JUMPSHOTS.higharc ? 0.1 : 0);
     let tx = h.x, tz = h.z, ty = RIM_Y + 0.15;
     let missOff = 0;
     if (!make) {
@@ -1507,7 +1561,11 @@ export class Game {
 
   aiFinish(p) {
     p.driveT = 0;
-    const canDunk = p.r.dunk >= 60 && p.r.vert + p.r.strength * 0.4 >= 72 && this.distHoop(p) < this.dunkRange(p);
+    const dh = this.distHoop(p);
+    const canDunk = this.canDunk(p) && dh < this.dunkRange(p);
+    const nd = this.nearestDefender(p);
+    // Floater over a rim protector from the short corner / lane line
+    if (!canDunk && dh > 6 && dh < 13 && nd.q && nd.d < 6 && (nd.q.r.block > 65 || nd.q.heightFt > p.heightFt + 0.3) && chance(0.4)) { this.startFloater(p); return; }
     this.startFinish(p, canDunk && chance(0.25 + p.r.dunk / 220) ? 'dunk' : 'layup');
   }
 
@@ -1684,6 +1742,11 @@ export class Game {
           }
           const was = p.action;
           p.action = null;
+          if (was === 'euro' && p.hasBall && this.ball.holder === p) {
+            this.startFinish(p, 'layup');
+            p.layupStyle = 'euro';
+            if (p.isUser) { p.meterOn = true; p.meter = 0; this.emit('meterStart', { p }); }
+          }
           if (was === 'land' && p.stepOver) {
             const v = p.stepOver; p.stepOver = null;
             const dx = v.pos.x - p.pos.x, dz = v.pos.z - p.pos.z, d = len(dx, dz);
@@ -1702,7 +1765,7 @@ export class Game {
       // Desired velocity
       let desX = 0, desZ = 0, sprint = false;
       const ms = this.maxSpeed(p);
-      const lockedAct = p.action && ['shoot', 'layup', 'dunk', 'hang', 'fall', 'posterfall', 'block', 'rebound', 'steal', 'pass', 'land', 'screen', 'stepover'].includes(p.action);
+      const lockedAct = p.action && ['shoot', 'layup', 'dunk', 'hang', 'fall', 'posterfall', 'block', 'rebound', 'steal', 'pass', 'land', 'screen', 'stepover', 'euro'].includes(p.action);
       if (p.isUser) {
         const m = input.move;
         const ml = len(m.x, m.z);
@@ -1787,6 +1850,12 @@ export class Game {
           const s = Math.min(26, d / k);
           p.vel.x = d > 0.2 ? dx / d * s : 0; p.vel.z = d > 0.2 ? dz / d * s : 0;
         } else if (p.action === 'hang') { p.vel.x = p.vel.z = 0; }
+        else if (p.action === 'euro' && p.euroDir) {
+          const k = p.actionT / p.actionDur, ed = p.euroDir, sd = p.euroSide || 1;
+          const lx = -ed.z * sd, lz = ed.x * sd; // toward the chosen side
+          const lat = k < 0.4 ? -5 : 14, fw = 9;
+          p.vel.x = ed.x * fw + lx * lat; p.vel.z = ed.z * fw + lz * lat;
+        }
         else if (p.action === 'stepover' && p.moveVel) {
           // Moves only while stepping (first 60%), then stands over him
           const f = p.actionT / p.actionDur < 0.6 ? 1 / 0.6 : 0;
@@ -1816,7 +1885,7 @@ export class Game {
         }
         else { const dec = Math.exp(-6 * dt); p.vel.x *= dec; p.vel.z *= dec; }
       } else {
-        const acc = 7 + p.r.speed * 0.05;
+        const acc = 9.5 + p.r.speed * 0.035;
         const k = 1 - Math.exp(-acc * dt);
         p.vel.x += (desX - p.vel.x) * k;
         p.vel.z += (desZ - p.vel.z) * k;
@@ -1906,7 +1975,7 @@ export class Game {
           // Hang on the rim if made
           this.resolveShot(p, 'dunk');
           if (this.ball.shot && this.ball.shot.make) {
-            if (p.dunkStyle === 'contact' && chance(0.45)) {
+            if ((p.dunkStyle === 'contact' && chance(0.45)) || p.r.dunk < 70) {
               // Through the defender: sometimes no hang, slam it through and come straight down
               this.setAction(p, 'hang', 0.24);
               p.hangY = Math.max(0.4, p.y - 1.6);
@@ -2027,7 +2096,10 @@ export class Game {
     if (ol > armL) {
       // Out of reach: the blocker closes the gap horizontally (bodies collide), the rest of the way the ball comes to them
       const hz = Math.hypot(ox, oz) || 1;
-      const close = Math.min(hz - 1.2, Math.max(0, ol - armL));
+      let close = Math.min(hz - 1.2, Math.max(0, ol - armL));
+      // Never through the shooter (a chase-down's ball is on the far side of him): stop 2 ft short of his body
+      const stopAt = t => len(def.pos.x + ox / hz * t - shooter.pos.x, def.pos.z + oz / hz * t - shooter.pos.z);
+      while (close > 0 && stopAt(close) < 2.0) close -= 0.1;
       if (close > 0) { def.pos.x += ox / hz * close; def.pos.z += oz / hz * close; }
       const rx = start.x - def.pos.x, rz = start.z - def.pos.z, rl = Math.hypot(rx, oy, rz) || 1;
       if (rl > armL) { const f = armL / rl; start.x = def.pos.x + rx * f; start.y = shY + oy * f; start.z = def.pos.z + rz * f; }

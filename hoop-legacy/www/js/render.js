@@ -378,6 +378,17 @@ export class Renderer {
     h.swishT = 0.6;
   }
 
+  // Practice balls for the warmups (copies of the game ball)
+  warmupBalls(n) {
+    this.clearWarmup();
+    this.wBalls = Array.from({ length: n }, () => { const m = this.ball.clone(); this.scene.add(m); return { mesh: m, pos: { x: 0, y: 0, z: 0 }, fly: null }; });
+    return this.wBalls;
+  }
+  clearWarmup() {
+    for (const b of this.wBalls || []) this.scene.remove(b.mesh);
+    this.wBalls = null; this.warmup = null; this.ball.visible = true;
+  }
+
   render(game, dt, time) {
     const ball = game.ball;
     let ballVis = null;
@@ -391,6 +402,7 @@ export class Renderer {
       // The building rocks while a home player is taking over
       if (p.toOn && !p.benched && p.team === game.homeIdx) this.hype = Math.max(this.hype || 0, 0.5);
     }
+    if (this.warmup) { this.warmup.place(); this.ball.visible = false; }
     // Ball visual
     const bp = this.ball.position;
     if (ballVis && ball.state === 'held') {
@@ -403,7 +415,7 @@ export class Renderer {
         const d = p.dribblePhase;
         const f = Math.abs(Math.cos(d * Math.PI));
         // Right under the palm at the top of the bounce, pushed out ahead (more at speed) where it hits the floor
-        const ahead = lerp(0.3 + spd * 0.03, 0.18, f);
+        const ahead = lerp(0.2 + spd * 0.02, 0.15, f);
         const top = hand.y - 0.42;
         // Flashy / shifty handlers carry the ball out wider on the dribble-hand side
         const wide = (p.anim ? p.anim.dribWide : 0) * (p.dribbleHand === 'R' ? -1 : 1) * (1 - f * 0.5);
@@ -483,7 +495,12 @@ export class Renderer {
 
     // Camera
     const bx = ball.vis ? ball.vis.x : ball.pos.x, bz = ball.vis ? ball.vis.z : ball.pos.z;
-    if (this.camMode === 'replay' && this.replayFocus) {
+    if (this.warmup) {
+      // Warmups / cutscenes: the warmup directs the camera
+      const c = this.warmup.camera();
+      this.camPos.x = damp(this.camPos.x, c.pos.x, 2.2, dt); this.camPos.y = damp(this.camPos.y, c.pos.y, 2.2, dt); this.camPos.z = damp(this.camPos.z, c.pos.z, 2.2, dt);
+      this.camLook.x = damp(this.camLook.x, c.look.x, 3, dt); this.camLook.y = damp(this.camLook.y, c.look.y, 3, dt); this.camLook.z = damp(this.camLook.z, c.look.z, 3, dt);
+    } else if (this.camMode === 'replay' && this.replayFocus) {
       // Replay: low, slowly orbiting camera on the play
       this.replayAng = (this.replayAng ?? Math.PI * 0.3) + dt * 0.3;
       const F = this.replayFocus;

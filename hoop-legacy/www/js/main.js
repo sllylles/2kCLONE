@@ -10,6 +10,7 @@ import { loadPlayerPack } from './player.js';
 import { Controls } from './controls.js';
 import { sfx, unlock, setMuted, startCrowd, stopCrowd } from './audio.js';
 import { Recorder, ReplayPlayer } from './replay.js';
+import { Warmup, cutscene } from './warmup.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
@@ -443,7 +444,15 @@ function renderHistory() {
   const c = career, t = c.totals, gp = Math.max(1, t.gp);
   $('listTitle').textContent = 'CAREER';
   const avg = k => (t[k] / gp).toFixed(1);
-  $('listBody').innerHTML = `<div class="statline"><div><b>${t.gp}</b><small>GP</small></div><div><b>${avg('pts')}</b><small>PPG</small></div><div><b>${avg('reb')}</b><small>RPG</small></div><div><b>${avg('ast')}</b><small>APG</small></div><div><b>${avg('stl')}</b><small>SPG</small></div><div><b>${avg('blk')}</b><small>BPG</small></div></div>
+  const goals = C.lifeGoals(c);
+  const goalsHTML = `<div class="up-group">LIFETIME GOALS</div><p class="hint">Stats are scaled to full NBA games (12-minute quarters, 82-game seasons). Career totals count NBA games.</p>
+    <div class="goals">${goals.map(gl => {
+      const nx = gl.next, prev = gl.done ? gl.tiers[gl.done - 1][0] : 0;
+      const pct = nx ? Math.min(100, Math.max(0, (gl.value - (gl.kind === 'game' ? 0 : prev)) / ((nx[0] - (gl.kind === 'game' ? 0 : prev)) || 1) * 100)) : 100;
+      return `<div class="goal ${nx ? '' : 'done'}"><div><b>${esc(gl.label)}</b><small>${nx ? `Next: ${nx[0].toLocaleString()}${nx[1] ? ' · beat ' + esc(nx[1]) : ''}` : 'All tiers done'} · ${gl.done}/${gl.tiers.length}</small>
+        <div class="track"><i style="width:${pct}%"></i></div></div><em>${gl.value.toLocaleString()}</em></div>`;
+    }).join('')}</div>`;
+  $('listBody').innerHTML = goalsHTML + `<div class="up-group">CAREER STATS</div><div class="statline"><div><b>${t.gp}</b><small>GP</small></div><div><b>${avg('pts')}</b><small>PPG</small></div><div><b>${avg('reb')}</b><small>RPG</small></div><div><b>${avg('ast')}</b><small>APG</small></div><div><b>${avg('stl')}</b><small>SPG</small></div><div><b>${avg('blk')}</b><small>BPG</small></div></div>
     ${c.awards.length ? `<div class="notes">${c.awards.map(a => `<div>🏆 ${esc(a)}</div>`).join('')}</div>` : ''}
     <table><tr><th>SEASON</th><th>PHASE</th><th>OPP</th><th>RESULT</th><th>GRD</th><th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>FG</th></tr>
     ${c.history.slice().reverse().map(h => `<tr><td>${h.season}</td><td>${h.phase.toUpperCase()}</td><td>${h.opp}</td><td style="color:${h.win ? 'var(--green)' : 'var(--red)'}">${h.win ? 'W' : 'L'} ${h.my}-${h.them}</td><td style="color:${gradeColor(h.grade)}">${h.grade}</td><td>${h.pts}</td><td>${h.reb}</td><td>${h.ast}</td><td>${h.stl}</td><td>${h.blk}</td><td>${h.fgm}/${h.fga}</td></tr>`).join('')}</table>`;
@@ -616,10 +625,11 @@ function runDraftNight() {
 
 // ---------------- Match ----------------
 let renderer = null, game = null, controls = null, matchInfo = null, last = 0, running = false, paused = false;
-let recorder = null, replay = null, lastReplayT = -99, reelShown = false, snapCam = false;
+let recorder = null, replay = null, lastReplayT = -99, reelShown = false, snapCam = false, heldClip = null;
 
 const DUNK_NAMES = { one: 'ONE-HAND JAM!', two: 'TWO-HAND SLAM!', tomahawk: 'TOMAHAWK!', cockback: 'COCK-BACK SLAM!', reverse: 'REVERSE JAM!',
-  clutch: 'CLUTCH DUNK!', windmill: 'WINDMILL!', '360': '360 DUNK!', btl: 'BETWEEN THE LEGS!', contact: 'IN HIS FACE!' };
+  clutch: 'CLUTCH DUNK!', windmill: 'WINDMILL!', '360': '360 DUNK!', btl: 'BETWEEN THE LEGS!', contact: 'IN HIS FACE!',
+  leaner: 'LEANER!', backscratch: 'BACK-SCRATCHER!', cradle: 'ROCK THE CRADLE!', windmill2: 'TWO-HAND WINDMILL!', '360wm': '360 WINDMILL!' };
 
 function markPlay(kind, p, score, label, instant) { if (recorder && p) recorder.mark(kind, p.idx, score, label, instant); }
 
@@ -714,7 +724,7 @@ function startMatch(info) {
     onEvent: onGameEvent,
   });
   game.homeIdx = info.teams.indexOf(info.homeTeam);
-  recorder = new Recorder(game); replay = null; lastReplayT = -99; reelShown = false;
+  recorder = new Recorder(game); replay = null; lastReplayT = -99; reelShown = false; heldClip = null;
   $('scrGame').classList.remove('replaying');
   renderer.camMode = settings.camera;
   renderer.camYaw = undefined;
@@ -734,19 +744,50 @@ function startMatch(info) {
   paused = false;
   game.start();
   if (game.phase !== 'bench') {
-    overlay(`<div class="ov-card"><div class="ng-label">${esc(info.label)}</div><h1>${esc(info.myTeam.name)} vs ${esc(info.opp.name)}</h1>
-      ${info.boost ? `<p>G League Boost: +${info.boost} to all attributes this game</p>` : ''}
-      ${tasksHTML(C.gameTasks(career, settings))}
-      <div class="ov-btns"><button class="btn ghost" id="ovHelp">CONTROLS</button><button class="btn primary" id="ovTip">TIP OFF</button></div></div>`);
+    // Warmups first (with the story's cutscene when there is one), then the tip-off card
     const prePhase = game.phase;
     game.phase = 'pregame';
-    $('ovTip').onclick = () => { overlay(null); game.phase = prePhase; sfx.whistle(); };
-    $('ovHelp').onclick = () => showHelp(() => startMatchOverlayAgain(info, prePhase));
+    runWarmup(info, () => tipOffCard(info, prePhase));
   }
   startCrowd();
   running = true;
   last = performance.now();
   requestAnimationFrame(loop);
+}
+let warmup = null;
+function runWarmup(info, done) {
+  const c = career, P = c.player;
+  const kind = c.phase === 'hs' && c.hs.round === 0 && !c.history.length ? 'debut' : c.phase === 'hs' && c.hs.round === 2 ? 'trash' : null;
+  const script = kind ? cutscene(kind, game, { school: info.myTeam.name, first: P.name.split(' ')[0] }) : null;
+  warmup = new Warmup(game, renderer, script);
+  $('scrGame').classList.add('warming');
+  const paint = () => {
+    const s = warmup.shot;
+    overlay(`<div class="wu" id="wuTap">
+      <div class="wu-top"><div class="ng-label">${esc(info.label)}</div><b>${s ? '' : 'WARMUPS'}</b></div>
+      ${s ? `<div class="wu-cap"><em>${esc(s.speaker)}</em><p>${esc(s.text)}</p></div>` : ''}
+      <div class="wu-hint">${s ? 'TAP TO CONTINUE' : 'TAP TO SKIP'}</div></div>`);
+    $('wuTap').onclick = () => { sfx.click(); if (warmup.shot && warmup.next()) paint(); else finish(); };
+  };
+  let auto = null;
+  const finish = () => {
+    if (!warmup) return;
+    clearTimeout(auto);
+    if (warmup.shot) { warmup.line = warmup.script.length; paint(); auto = setTimeout(finish, 9000); return; } // cutscene over: a few seconds of warmups, then tip-off
+    warmup.end(); warmup = null; overlay(null); $('scrGame').classList.remove('warming'); done();
+  };
+  paint();
+  if (!script) auto = setTimeout(finish, 12000);
+}
+function tipOffCard(info, prePhase) {
+  {
+    overlay(`<div class="ov-card"><div class="ng-label">${esc(info.label)}</div><h1>${esc(info.myTeam.name)} vs ${esc(info.opp.name)}</h1>
+      ${info.boost ? `<p>G League Boost: +${info.boost} to all attributes this game</p>` : ''}
+      ${tasksHTML(C.gameTasks(career, settings))}
+      <div class="ov-btns"><button class="btn ghost" id="ovHelp">CONTROLS</button><button class="btn primary" id="ovTip">TIP OFF</button></div></div>`);
+    $('ovTip').onclick = () => { overlay(null); game.phase = prePhase; sfx.whistle(); };
+    $('ovHelp').onclick = () => showHelp(() => startMatchOverlayAgain(info, prePhase));
+  }
 }
 function startMatchOverlayAgain(info, prePhase) {
   overlay(`<div class="ov-card"><h1>READY?</h1><div class="ov-btns"><button class="btn primary" id="ovTip">TIP OFF</button></div></div>`);
@@ -849,8 +890,9 @@ function onGameEvent(type, d) {
     case 'steal': sfx.steal(); if (d.def.isUser) { toast('STOLEN!', '#3ddc84'); vib(40); } else if (d.h && d.h.isUser) toast('TURNOVER', '#e5484d'); break;
     case 'dunk': {
       const dn = DUNK_NAMES[d.p.dunkStyle] || 'SLAM!';
-      const flashy = ['windmill', '360', 'btl', 'reverse', 'contact'].includes(d.p.dunkStyle);
-      markPlay('dunk', d.p, d.p.isUser ? (flashy ? 8 : 7) : flashy ? 5 : 3, dn, d.p.isUser);
+      const flashy = ['windmill', '360', 'btl', 'reverse', 'contact', 'leaner', 'backscratch', 'cradle', 'windmill2', '360wm'].includes(d.p.dunkStyle);
+      // Only the flashy / contact ones get an instant replay (all of them still go in the highlight reel)
+      markPlay('dunk', d.p, d.p.isUser ? (flashy ? 8 : 6) : flashy ? 5 : 3, dn, d.p.isUser && flashy);
       sfx.dunk(); renderer.shake = 0.45; renderer.hype = Math.max(renderer.hype || 0, flashy ? 1.4 : 1.1);
       if (d.p.isUser) { toast(dn, '#ff5a1f'); vib(70); }
       break;
@@ -926,6 +968,7 @@ function endMatch() {
 }
 
 function finishMatch(info, res, g) {
+  res.scale = { q: settings.qLen, season: settings.seasonLength };
   const out = C.applyResult(career, info, res);
   C.saveCareer(career);
   const s = res.stats;
@@ -944,12 +987,16 @@ function finishMatch(info, res, g) {
       <div class="ng-label">${esc(info.label)} · vs ${esc(info.opp.name)}</div>
       <div class="statline"><div><b>${s.pts}</b><small>PTS</small></div><div><b>${s.reb}</b><small>REB</small></div><div><b>${s.ast}</b><small>AST</small></div><div><b>${s.stl}</b><small>STL</small></div><div><b>${s.blk}</b><small>BLK</small></div><div><b>${s.fgm}/${s.fga}</b><small>FG</small></div></div>
       ${out.tasks.length ? tasksHTML(out.tasks.map(t => ({ ...t, id: 'pts' })), null, null, out.tasks) : ''}
-      <div class="notes">${out.newAnims.map(a => `<div class="badge-up" style="border-left-color:var(--green)">NEW ANIMATION UNLOCKED: ${esc(a.name)} · equip it on the Animations page</div>`).join('')}${out.badgeUps.map(u => `<div class="badge-up" style="border-left-color:${BADGE_COLORS[u.tier - 1]}">${badgeChip(u.key, u.tier)} NEW BADGE: ${BADGES[u.key].name} (${BADGE_TIERS[u.tier - 1]})</div>`).join('')}${out.boosts.map(b => `<div class="boost">Skill boost: ${esc(b)}</div>`).join('')}${out.notes.map(n => `<div>${esc(n)}</div>`).join('')}</div>
+      <div class="notes">${out.goals.map(x => `<div class="badge-up" style="border-left-color:var(--gold)">LIFETIME GOAL: ${esc(x.label)} ${x.n.toLocaleString()}${x.who ? ` · passed ${esc(x.who)}` : ''} · +${x.ap} AP +${x.vc.toLocaleString()} VC</div>`).join('')}${out.newAnims.map(a => `<div class="badge-up" style="border-left-color:var(--green)">NEW ANIMATION UNLOCKED: ${esc(a.name)} · equip it on the Animations page</div>`).join('')}${out.badgeUps.map(u => `<div class="badge-up" style="border-left-color:${BADGE_COLORS[u.tier - 1]}">${badgeChip(u.key, u.tier)} NEW BADGE: ${BADGES[u.key].name} (${BADGE_TIERS[u.tier - 1]})</div>`).join('')}${out.boosts.map(b => `<div class="boost">Skill boost: ${esc(b)}</div>`).join('')}${out.notes.map(n => `<div>${esc(n)}</div>`).join('')}</div>
       ${box}
       <div class="ov-btns" style="justify-content:flex-start"><button class="btn primary" id="postGo">CONTINUE</button></div>
     </div>`;
   show('scrPost', false);
-  $('postGo').onclick = () => { sfx.click(); goCareer(); if (out.newAnims.length) announceUnlocks(out.newAnims); };
+  $('postGo').onclick = () => {
+    sfx.click(); goCareer();
+    if (out.goals.length) { const x = out.goals[out.goals.length - 1]; toastMenu(`LIFETIME GOAL: ${x.label} ${x.n.toLocaleString()}${x.who ? ' · passed ' + x.who : ''}`, 'See all your goals on the Career page', 'var(--gold)', () => renderHistory()); }
+    else if (out.newAnims.length) announceUnlocks(out.newAnims);
+  };
 }
 
 // ---------------- Loop ----------------
@@ -969,6 +1016,7 @@ function loop(now) {
   else mode = 'defense';
   controls.setMode(mode === 'ball' && u.post ? 'post' : mode);
   const input = controls.poll((x, z) => renderer.worldMap(x, z));
+  if (warmup && !paused) warmup.update(dt);
   if (!paused) {
     // Fixed-ish substeps for stable physics
     const steps = dt > 0.02 ? 2 : 1;
@@ -979,9 +1027,15 @@ function loop(now) {
   if (!paused && recorder) {
     recorder.capture(dt);
     const clip = recorder.update();
-    if (clip && settings.replays !== false && (g.phase === 'live' || g.phase === 'dead') && g.time - lastReplayT > 15) {
+    // Instant replays wait for a dead ball, so they never cut into a possession (an ankle breaker shows once
+    // the play is over), and they're spaced out (dunks most of all)
+    if (clip && settings.replays !== false) heldClip = { clip, t: g.time };
+    if (heldClip && g.time - heldClip.t > 9) heldClip = null;
+    const gap = heldClip && heldClip.clip.kind === 'dunk' ? 40 : 20;
+    if (heldClip && g.phase === 'dead' && g.ball.state !== 'shot' && g.ball.state !== 'net' && g.time - lastReplayT > gap) {
       lastReplayT = g.time;
-      startReplay([clip], 'instant', null);
+      const c2 = heldClip.clip; heldClip = null;
+      startReplay([c2], 'instant', null);
     }
   }
 }

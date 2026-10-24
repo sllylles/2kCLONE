@@ -401,3 +401,19 @@ tr.cut td { border-bottom: 2px dashed rgba(255,90,31,.6); }
 /* Hub next-game card: content scrolls, PLAY / SIM always visible at the bottom */
 .ng-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .next-game .tasks .task { padding: 4px 8px; margin-top: 3px; }
+/* Lifetime goals */
+.goals { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.goal { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; background: var(--panel2); border-radius: 10px; padding: 8px 12px; }
+.goal b { font-style: italic; font-size: 14px; } .goal small { display: block; color: var(--dim); font-size: 11px; margin: 2px 0 5px; }
+.goal .track { height: 5px; border-radius: 3px; background: #0c0e15; overflow: hidden; } .goal .track i { display: block; height: 100%; background: linear-gradient(90deg, #ff9f1c, #ffd23f); }
+.goal em { font-style: italic; font-weight: 900; font-size: 18px; color: var(--gold); }
+.goal.done { border: 1px solid rgba(255, 210, 63, .45); }
+/* Warmups / cutscenes */
+.wu { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 14px calc(18px + var(--safe-r)) 18px calc(18px + var(--safe-l)); pointer-events: auto; cursor: pointer; background: linear-gradient(transparent 60%, rgba(0,0,0,.55)); }
+.wu-top b { display: block; font-size: 26px; font-weight: 900; font-style: italic; text-shadow: 0 3px 12px rgba(0,0,0,.8); }
+.wu-cap { align-self: center; max-width: 720px; background: rgba(10,12,18,.85); border-left: 4px solid var(--gold); border-radius: 10px; padding: 10px 16px; margin-top: auto; margin-bottom: 8px; }
+.wu-cap em { color: var(--gold); font-style: normal; font-weight: 900; font-size: 13px; letter-spacing: .06em; }
+.wu-cap p { margin: 4px 0 0; font-size: 17px; font-weight: 700; line-height: 1.35; }
+.wu-hint { align-self: center; color: var(--dim); font-size: 12px; font-weight: 800; letter-spacing: .12em; animation: toPulse 1s infinite alternate; }
+.overlay:has(.wu) { background: transparent; }
+#scrGame.warming .hud, #scrGame.warming #controls { visibility: hidden; }

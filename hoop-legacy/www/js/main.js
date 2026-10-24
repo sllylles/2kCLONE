@@ -8,7 +8,8 @@ import { Game } from './game.js';
 import { Renderer } from './render.js';
 import { loadPlayerPack } from './player.js';
 import { Controls } from './controls.js';
-import { sfx, unlock, setMuted, startCrowd, stopCrowd } from './audio.js';
+import { sfx, unlock, setMuted, startCrowd, stopCrowd, playVO, stopVO } from './audio.js';
+import { VO } from './vo-lines.js';
 import { Recorder, ReplayPlayer } from './replay.js';
 import { Warmup, cutscene } from './warmup.js';
 
@@ -288,13 +289,18 @@ function runInterview(key, done) {
       $('ivDone').onclick = () => { sfx.click(); m.classList.remove('on'); C.saveCareer(career); done(); };
       return;
     }
-    const [question, answers] = iv.qs[q];
-    m.innerHTML = `<div class="ov-card iv"><div class="ng-label">${esc(iv.outlet)} · ${esc(iv.who)}</div>${q === 0 ? `<p class="hint">${esc(iv.intro)}</p>` : ''}
+    const [question0, answers] = iv.qs[q];
+    const qv = VO[`iv_${key}_${q}`], introV = VO[`iv_${key}_intro`];
+    const question = qv ? qv.text : question0, intro = introV ? introV.text : iv.intro;
+    // The narrator sets the scene, then the interviewer asks
+    if (q === 0 && introV) playVO(`iv_${key}_intro`, () => { if (qv) playVO(`iv_${key}_${q}`); });
+    else if (qv) playVO(`iv_${key}_${q}`);
+    m.innerHTML = `<div class="ov-card iv"><div class="ng-label">${esc(iv.outlet)} · ${esc(iv.who)}</div>${q === 0 ? `<p class="hint">${esc(intro)}</p>` : ''}
       <h2>"${esc(question)}"</h2><div class="iv-ans">
       <button class="choice" data-a="0"><b>${esc(answers[0])}</b><small>FANS ↑</small></button>
       <button class="choice" data-a="1"><b>${esc(answers[1])}</b><small>TEAM CHEMISTRY ↑</small></button></div></div>`;
     m.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => {
-      sfx.click();
+      sfx.click(); stopVO();
       const r = C.answerInterview(career, key, q, +b.dataset.a);
       gotF += r.fans; gotC += r.chem; q++; step();
     }));
@@ -825,10 +831,18 @@ function runWarmup(info, done) {
       <div class="wu-top"><div class="ng-label">${esc(info.label)}</div><b>${s ? '' : 'WARMUPS'}</b></div>
       ${s ? `<div class="wu-cap"><em>${esc(s.speaker)}</em><p>${esc(s.text)}</p></div>` : ''}
       <div class="wu-hint">TAP TO SKIP</div></div>`);
-    $('wuTap').onclick = () => { sfx.click(); clearTimeout(lineT); if (warmup && warmup.shot) warmup.line = warmup.script.length; finish(); };
-    // The scene plays out on its own: each line stays up long enough to read, then the next one
+    $('wuTap').onclick = () => { sfx.click(); clearTimeout(lineT); stopVO(); if (warmup && warmup.shot) warmup.line = warmup.script.length; finish(); };
+    // The scene plays out on its own: each line is spoken (voice acting), then a beat, then the next one.
+    // Lines without audio (or when muted) stay up long enough to read.
     clearTimeout(lineT);
-    if (s) lineT = setTimeout(() => { if (!warmup) return; if (warmup.next()) paint(); else finish(); }, 1800 + s.text.length * 45);
+    if (!s) return;
+    const advance = () => { clearTimeout(lineT); if (!warmup) return; if (warmup.next()) paint(); else finish(); };
+    const readT = 1800 + s.text.length * 45;
+    if (s.vo) {
+      const me = warmup.line;
+      lineT = setTimeout(advance, ((VO[s.vo] && VO[s.vo].dur) || 4) * 1000 + 3500); // safety net
+      playVO(s.vo, ok => { if (!warmup || warmup.line !== me) return; clearTimeout(lineT); lineT = setTimeout(advance, ok ? 650 : readT); });
+    } else lineT = setTimeout(advance, readT);
   };
   let lineT = null;
   let auto = null;
@@ -836,7 +850,7 @@ function runWarmup(info, done) {
     if (!warmup) return;
     clearTimeout(auto);
     if (warmup.shot) { warmup.line = warmup.script.length; paint(); auto = setTimeout(finish, 9000); return; } // cutscene over: a few seconds of warmups, then tip-off
-    warmup.end(); warmup = null; overlay(null); $('scrGame').classList.remove('warming'); done();
+    stopVO(); warmup.end(); warmup = null; overlay(null); $('scrGame').classList.remove('warming'); done();
   };
   paint();
   if (!script) auto = setTimeout(finish, 12000);

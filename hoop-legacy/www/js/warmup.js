@@ -2,6 +2,7 @@
 // story's cutscenes (first game, rivalry trash talk) play over it. Drives the players directly; the game sim
 // is paused (phase 'pregame') until tip-off.
 import { HOOP_X, RIM_Y } from './game.js';
+import { VO } from './vo-lines.js';
 
 const G = 30;
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -154,32 +155,27 @@ export function cutscene(kind, game, names) {
   const u = game.user.idx;
   const opp = game.players.filter(p => p.team !== game.user.team).sort((a, b) => (b.ovr || 0) - (a.ovr || 0))[0];
   const d = game.dir(game.user.team);
+  // Voiced lines: the text shown is exactly what's spoken (see vo-lines.js)
+  const L = id => ({ vo: id, text: VO[id].text });
   if (kind === 'debut') {
     const tunnel = { x: -d * 10, z: 27 }, spot = { x: d * 26, z: 4 };
     return [
-      { focus: u, cam: { dx: -6, dy: 5, dz: 9 }, walkTo: { [u]: { x: 0, z: 22 } }, speaker: 'Narrator', text: `${names.school} gym. Packed to the rafters for your first varsity game.`, start: { [u]: tunnel } },
-      { focus: u, cam: { dx: 5, dy: 5.5, dz: 10 }, walkTo: { [u]: spot }, speaker: 'Coach Reyes', text: `Get loose, ${names.first}. Scouts are in the stands tonight. Let them see what we see.` },
-      { focus: u, cam: { dx: -4, dy: 6, dz: 12 }, speaker: names.first, text: 'Breathe. Same rim as the driveway. Let\'s work.' },
+      { focus: u, cam: { dx: -6, dy: 5, dz: 9 }, walkTo: { [u]: { x: 0, z: 22 } }, speaker: 'Narrator', ...L('debut_1'), start: { [u]: tunnel } },
+      { focus: u, cam: { dx: 5, dy: 5.5, dz: 10 }, walkTo: { [u]: spot }, speaker: 'Coach Reyes', ...L('debut_2') },
+      { focus: u, cam: { dx: -4, dy: 6, dz: 12 }, speaker: names.first, ...L('debut_3') },
     ];
   }
   // Trash talk: they walk up face to face, three exchanges, then the coach (or teammate) pulls you away
-  const LINES = {
-    trash: [`So you're the one everybody's been talking about? Rankings don't mean nothing in a state final.`, `Guess we'll find out in about ten minutes.`,
-      `Tell your folks to film it. You're ending up on my poster.`, `Don't let him in your head, ${names.first}. Let your game do the talking. Bring that trophy home.`, 'Coach Reyes'],
-    rival: [`${names.first}. Saw your little highlight tape. Cute. Everybody keeps saying your name like I'm not in this conference.`, `Keep saying mine then. I'll give you something to say it about.`,
-      `Check the stat sheet after tonight. Mine's gonna be longer. It always is.`, `That's ${names.rivalFirst}. He's been talking about this one all week. Make him eat it.`, 'Teammate'],
-    heated: [`You again. Last time you got lucky. Not happening in my building.`, `Lucky? Look at the scoreboard from last time.`,
-      `Keep talking. We'll see who's still standing in the fourth.`, `Easy, easy. Save it for the game. They want you to lose your head.`, 'Teammate'],
-  }[kind];
+  const LINES = { trash: 'Coach Reyes', rival: 'Teammate', heated: 'Teammate' }[kind] && [1, 2, 3, 4].map(i => L(`${kind}_${i}`)).concat([{ trash: 'Coach Reyes', rival: 'Teammate', heated: 'Teammate' }[kind]]);
   if (LINES) {
     const t = names.talker != null ? game.players[names.talker] : opp;
     const mid = { x: 0, z: 2 }, close = { [t.idx]: { x: d * 2.5, z: 2 }, [u]: { x: -d * 2.3, z: 2 } }, faceEach = { [t.idx]: { x: -d * 2, z: 2 }, [u]: { x: d * 2, z: 2 } };
     const who = `#${t.num} ${t.name}`;
     return [
-      { focus: t.idx, start: { [t.idx]: { x: d * 9, z: 6 }, [u]: { x: -d * 6, z: -2 } }, cam: { dx: 6, dy: 5.5, dz: 10 }, walkTo: { [t.idx]: { x: d * 3.2, z: 2 }, [u]: { x: -d * 2.3, z: 2 } }, face: { [t.idx]: mid, [u]: mid }, speaker: who, text: LINES[0] },
-      { focus: u, with: t.idx, cam: { dx: 0, dy: 5.8, dz: 9 }, walkTo: close, face: faceEach, speaker: names.first, text: LINES[1] },
-      { focus: t.idx, with: u, cam: { dx: -5, dy: 5.5, dz: 8 }, walkTo: close, face: faceEach, speaker: who, text: LINES[2] },
-      { focus: u, cam: { dx: 6, dy: 5, dz: 8 }, walkTo: { [t.idx]: { x: -d * 14, z: -6 }, [u]: { x: d * 10, z: 4 } }, speaker: LINES[4], text: LINES[3] },
+      { focus: t.idx, start: { [t.idx]: { x: d * 9, z: 6 }, [u]: { x: -d * 6, z: -2 } }, cam: { dx: 6, dy: 5.5, dz: 10 }, walkTo: { [t.idx]: { x: d * 3.2, z: 2 }, [u]: { x: -d * 2.3, z: 2 } }, face: { [t.idx]: mid, [u]: mid }, speaker: who, ...LINES[0] },
+      { focus: u, with: t.idx, cam: { dx: 0, dy: 5.8, dz: 9 }, walkTo: close, face: faceEach, speaker: names.first, ...LINES[1] },
+      { focus: t.idx, with: u, cam: { dx: -5, dy: 5.5, dz: 8 }, walkTo: close, face: faceEach, speaker: who, ...LINES[2] },
+      { focus: u, cam: { dx: 6, dy: 5, dz: 8 }, walkTo: { [t.idx]: { x: -d * 14, z: -6 }, [u]: { x: d * 10, z: 4 } }, speaker: LINES[4], ...LINES[3] },
     ];
   }
   return null;

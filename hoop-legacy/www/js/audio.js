@@ -78,3 +78,22 @@ export function startCrowd() {
 export function stopCrowd() {
   if (crowdGain) { try { crowdGain._src.stop(); } catch (e) { /* ignore */ } crowdGain.disconnect(); crowdGain = null; }
 }
+
+// Voice acting: plays audio/vo/<id>.mp3 (one line at a time), ducking the crowd under it. `onEnd` fires when the
+// line finishes (or right away if muted / it can't play), so cutscenes can wait for the voice.
+let voEl = null;
+export function playVO(id, onEnd) {
+  stopVO();
+  if (muted) { if (onEnd) onEnd(false); return; }
+  const a = new Audio(`audio/vo/${id}.mp3`);
+  voEl = a;
+  a.volume = 1;
+  if (crowdGain && ctx) crowdGain.gain.setTargetAtTime(0.012, ctx.currentTime, 0.15);
+  let done = false;
+  const fin = ok => { if (done) return; done = true; if (voEl === a) voEl = null; if (crowdGain && ctx) crowdGain.gain.setTargetAtTime(0.035, ctx.currentTime, 0.4); if (onEnd) onEnd(ok); };
+  a.onended = () => fin(true);
+  a.onerror = () => fin(false);
+  const p = a.play();
+  if (p && p.catch) p.catch(() => fin(false));
+}
+export function stopVO() { if (voEl) { const a = voEl; voEl = null; a.onended = a.onerror = null; try { a.pause(); } catch (e) { /* ignore */ } if (crowdGain && ctx) crowdGain.gain.setTargetAtTime(0.035, ctx.currentTime, 0.4); } }

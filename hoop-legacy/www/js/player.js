@@ -1397,7 +1397,7 @@ export class PlayerModel {
       const from = lerp(jf, rel, FLASHY_DUNKS.includes(st) ? 0.72 : 0.4);
       if (k < rel) { w = ease(clamp01((k - from) / Math.max(0.01, rel - from))); hangY = 0.75; lift = 0.35; }
       else { w = 1 - clamp01((k - rel) / 0.3); hangY = 0.12; }
-    } else if (act === 'hang') { w = st === 'contact' ? 1 - clamp01(((p.actionT || 0) - 0.04) / 0.14) : 1; hangY = 0.06; }
+    } else if (act === 'hang') { w = st === 'contact' && p.actionDur < 0.4 ? 1 - clamp01(((p.actionT || 0) - 0.04) / 0.14) : 1; hangY = 0.06; }
     // First instant of the hang: the hand(s) finish pushing the ball down through the middle of the rim
     const slam = act === 'hang' ? 1 - clamp01(((p.actionT || 0) - 0.08) / 0.1) : 0;
     const prevOff = this.yOff;
@@ -1412,7 +1412,7 @@ export class PlayerModel {
     let dx = p.pos.x - cx, dz = p.pos.z; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
     // Points on the near side of the rim (or above its centre on the way up)
     const R = act === 'hang' || lift === 0 ? lerp(0.72, 0.15, slam) : lift;
-    if (slam > 0) hangY = lerp(hangY, 0.45, slam);
+    if (slam > 0) hangY = lerp(hangY, 0.12, slam);
     const spread = two ? 0.42 : 0;
     const tgt = (a) => new THREE.Vector3(cx + R * (dx * Math.cos(a) - dz * Math.sin(a)), RIM_Y + hangY, R * (dz * Math.cos(a) + dx * Math.sin(a)));
     const arms = two ? [[this.armR, tgt(-spread)], [this.armL, tgt(spread)]] : [[this.armR, tgt(0)]];
@@ -1434,7 +1434,7 @@ export class PlayerModel {
     off /= arms.length;
     // Hanging: hands on the rim both ways. Rising: only ever lift (a high jump bends the elbows instead).
     const lo = act === 'hang' ? -0.3 : 0;
-    const goal = Math.max(lo, Math.min(act === 'hang' ? 2.2 : 1.1, this.yOff + off)) * w;
+    const goal = Math.max(lo, Math.min(act === 'hang' ? 0.35 : 1.1, this.yOff + off)) * w;
     this.yOff = damp(this.yOff, goal, act === 'hang' ? 30 : 20, dt);
     this.body.position.y += this.yOff - prevOff;
     this.root.updateMatrixWorld(true);

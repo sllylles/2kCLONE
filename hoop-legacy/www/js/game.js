@@ -1832,7 +1832,7 @@ export class Game {
       p.pos.z = clamp(p.pos.z, -24.8 - ob, 24.8 + ob);
 
       // Vertical
-      if (p.action === 'hang') { p.vy = 0; if (p.hangY != null) p.y += (p.hangY - p.y) * (1 - Math.exp(-12 * dt)); }
+      if (p.action === 'hang') { p.vy = 0; if (p.hangY != null) p.y += (p.hangY - p.y) * (1 - Math.exp(-24 * dt)); }
       else if (p.y > 0 || p.vy > 0) {
         p.vy -= G_PLAYER * dt;
         p.y += p.vy * dt;
@@ -1906,14 +1906,15 @@ export class Game {
           // Hang on the rim if made
           this.resolveShot(p, 'dunk');
           if (this.ball.shot && this.ball.shot.make) {
-            if (p.dunkStyle === 'contact') {
-              // Through the defender: no hanging around up there, slam it through and come straight down
+            if (p.dunkStyle === 'contact' && chance(0.45)) {
+              // Through the defender: sometimes no hang, slam it through and come straight down
               this.setAction(p, 'hang', 0.24);
               p.hangY = Math.max(0.4, p.y - 1.6);
             } else {
               this.setAction(p, 'hang', 0.65);
-              // Hands on the rim: pull down from the top of the jump into a straight-arm hang
-              p.hangY = RIM_Y + 0.15 - reachOf(p.heightFt) * 0.985;
+              // Hands on the rim: pull down from the top of the jump into a full straight-arm hang, body
+              // hanging below the rim (not perched up at it)
+              p.hangY = RIM_Y + 0.05 - reachOf(p.heightFt);
               p.y = Math.max(p.y, p.hangY);
             }
             this.emit('dunk', { p }); this.bc(p, 'posterizer');

@@ -7,6 +7,7 @@ import { reachOf, FLASHY_DUNKS, animProfile } from './data.js';
 const lerp = (a, b, t) => a + (b - a) * t;
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const ease = t => t * t * (3 - 2 * t);
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
@@ -749,12 +750,12 @@ export class PlayerModel {
       const wing = lerp(0.6, 0.95, D);
       T.sLz = wing + (alt > 0 ? 0.15 : 0); T.sRz = -(wing + (alt < 0 ? 0.15 : 0));
       T.sLx = alt > 0 ? -0.35 : -0.2; T.sRx = alt < 0 ? -0.35 : -0.2; T.eL = -0.35; T.eR = -0.35; T.wL = T.wR = 0.15;
-      if (hi > 0.35) {
-        // Bigs: one hand up to wall off shots and lobs, the other low and wide for the bounce pass
-        const up = -1.5 - 0.9 * hi, lowA = -0.25;
-        if (alt > 0) { T.sRx = up; T.sRz = -0.3; T.eR = -0.3; T.sLx = lowA; T.sLz = 0.85; T.eL = -0.35; }
-        else { T.sLx = up; T.sLz = 0.3; T.eL = -0.3; T.sRx = lowA; T.sRz = -0.85; T.eR = -0.35; }
-        T.crouch -= 0.1 * hi;
+      // Hands stay down in the athletic stance; a hand only goes up to contest (below), or for bigs walling
+      // off the rim when the ball handler gets into the paint
+      const bh = game.ball && game.ball.holder;
+      if (hi > 0.35 && bh && bh.team !== p.team && Math.hypot(bh.pos.x - p.pos.x, bh.pos.z - p.pos.z) < 7 && Math.abs(bh.pos.x) > 30) {
+        const up = -1.6 - 0.8 * hi;
+        if (alt > 0) { T.sRx = up; T.sRz = -0.3; T.eR = -0.3; } else { T.sLx = up; T.sLz = 0.3; T.eL = -0.3; }
       }
       const base = lerp(0.28, 0.45, D);
       T.hLz = base; T.hRz = -base; T.kL = T.kR = lerp(0.8, 1.25, D); T.hLx = -0.35; T.hRx = -0.35;
@@ -769,6 +770,17 @@ export class PlayerModel {
       T.sLx += Math.sin(time * (4 + 4 * D) + p.idx) * (0.06 + 0.18 * D);
       T.sRx += Math.sin(time * (3.5 + 3 * D) + p.idx * 2.1) * 0.1 * D;
       if (p.intenseD) { T.crouch = 1.0; T.sLz = 1.25; T.sRz = -1.25; T.hLz = 0.4; T.hRz = -0.4; }
+      // Contest: when someone near you rises to shoot, the near hand goes straight up in his face
+      let shooter = null, sd = 9;
+      for (const q of game.players) {
+        if (q.team === p.team || !['shoot', 'layup', 'dunk'].includes(q.action) || q.released) continue;
+        const dq = Math.hypot(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
+        if (dq < sd) { sd = dq; shooter = q; }
+      }
+      if (shooter) {
+        const ct = clamp01((shooter.actionT || 0) / 0.25);
+        T.sRx = lerp(T.sRx, -2.95, ct); T.sRz = lerp(T.sRz, -0.1, ct); T.eR = lerp(T.eR, -0.05, ct); T.crouch = lerp(T.crouch, 0.45, ct); T.lean = lerp(T.lean, 0.12, ct);
+      }
       // Closing out on a shooter: hand straight up in his face
       if (p.closeT > game.time) { T.sRx = -2.95; T.sRz = -0.1; T.eR = -0.05; T.crouch = 0.5; T.lean = 0.15; T.sLx = -0.9; T.sLz = 0.7; }
       if (p.boxing) {
@@ -891,6 +903,11 @@ export class PlayerModel {
             if (pa.kick > 0) { T.hLx = -0.75; T.kL = 0.55; } else if (pa.kick < 0) { T.hRx = -0.75; T.kR = 0.55; }
           }
           T.headX = lerp(0.15, -0.2, drive);
+          if (p.contestSide && !p.shotStyle) {
+            // Shooting around a hand in his face: lean away from the defender and release off to the side
+            const cs = p.contestSide;
+            T.tilt = cs * 0.2 * lift; T.side = cs * 0.08 * lift; T.sRz += cs * 0.25 * lift; T.lean -= 0.08 * lift;
+          }
           T.lean = t < ja ? 0.1 * dip : -0.06;
           if (p.shotStyle === 'drift') {
             // Drifting jumper: shoulders stay square to the rim while the legs swing out toward the drift
@@ -940,6 +957,15 @@ export class PlayerModel {
         }
         T.hLx = -1.45; T.kL = 1.7; T.hRx = 0.25; T.kR = 0.3;
         T.sRx = lerp(-1.2, -3.05, Math.min(1, k * 1.7)); T.eR = -0.12;
+        if (p.contactSide) {
+          // Contact layup: shoulder and off forearm into the defender, body leaning into him, ball high on the far side
+          const cs = p.contactSide, up = ease(clamp01(k / 0.35));
+          T.tilt = -cs * 0.22 * up; T.twist = cs * 0.25 * up; T.lean = 0.2;
+          T.sLx = -1.25; T.sLz = 0.25; T.eL = -1.9; T.sRx = lerp(-1.4, -3.15, up); T.sRz = -0.25; T.eR = -0.25;
+          T.wR = p.released ? 0.9 : -0.4; T.fR = 0.3;
+          if (!p.released) ball = k < 0.2 ? 'both' : 'R';
+          break;
+        }
         T.sLx = -0.9; T.sLz = 0.5; T.eL = -0.9; T.lean = 0.05; T.headX = -0.3;
         T.wR = p.released ? 0.9 : -0.4; T.fR = 0.3;
         if (!p.released) ball = k < 0.25 ? 'both' : 'R';
@@ -1120,8 +1146,8 @@ export class PlayerModel {
           // One-hand rejection: reach with one arm, other arm down for balance, knee drive
           const R = p.blockHand !== 'L';
           const reach = lerp(-1.6, -3.05, rise) + swat * 0.9 + ft * 1.2;
-          if (R) { T.sRx = reach; T.sRz = -0.1; T.eR = -0.05; T.sLx = -0.5; T.sLz = 0.7; T.eL = -0.6; }
-          else { T.sLx = reach; T.sLz = 0.1; T.eL = -0.05; T.sRx = -0.5; T.sRz = -0.7; T.eR = -0.6; }
+          if (R) { T.sRx = reach; T.sRz = -0.1; T.eR = -0.05; T.sLx = -0.85; T.sLz = 0.4; T.eL = -0.9; }
+          else { T.sLx = reach; T.sLz = 0.1; T.eL = -0.05; T.sRx = -0.85; T.sRz = -0.4; T.eR = -0.9; }
           T.twist = (R ? -1 : 1) * (0.3 * rise + 0.3 * ft); T.tilt = (R ? 1 : -1) * 0.12 * rise; T.lean += 0.15 * ft;
           T.hLx = R ? -0.9 * rise : 0.1; T.kL = R ? 1.2 : 0.3; T.hRx = R ? 0.1 : -0.9 * rise; T.kR = R ? 0.3 : 1.2;
         } else {
@@ -1333,11 +1359,27 @@ export class PlayerModel {
     // Blend; snappier while performing actions
     const kBlend = act ? (act === 'fall' || act === 'posterfall' ? 14 : act === 'shoot' || act === 'layup' ? 34 : 24) : 13;
     // Critically damped spring per joint: eases into and out of every pose change (no velocity pops)
-    const w = kBlend * 1.35, e = Math.exp(-w * dt);
+    // Weight shifts: the body leans into speeding up / slowing down and into hard cuts (from the actual
+    // acceleration, smoothed), so starts, stops and changes of direction read with momentum
+    if (!act || act === 'stumble') {
+      const ax = (p.vel.x - (this.lastVel ? this.lastVel.x : p.vel.x)) / Math.max(dt, 1e-3), az = (p.vel.z - (this.lastVel ? this.lastVel.z : p.vel.z)) / Math.max(dt, 1e-3);
+      const k2 = 1 - Math.exp(-8 * dt);
+      this.accF = (this.accF || 0) + ((ax * fx + az * fz) - (this.accF || 0)) * k2;
+      this.accS = (this.accS || 0) + ((ax * fz - az * fx) - (this.accS || 0)) * k2;
+      T.lean += clamp(this.accF * 0.006, -0.22, 0.18);
+      T.tilt += clamp(this.accS * 0.004, -0.14, 0.14);
+      T.hLz += clamp(this.accS * 0.002, -0.08, 0.08); T.hRz += clamp(this.accS * 0.002, -0.08, 0.08);
+    }
+    this.lastVel = { x: p.vel.x, z: p.vel.z };
+    // Overlap: legs and hips lead, the torso follows, arms and head trail a touch behind (softer springs), so
+    // motions flow into each other instead of the whole body snapping as one piece
+    const w = kBlend * 1.35;
     for (const key in T) {
-      const x0 = this.pose[key] - T[key], v0 = this.pvel[key] || 0, tmp = (v0 + w * x0) * dt;
+      const c0 = key[0], soft = (c0 === 's' && key !== 'sit' && key !== 'side') || c0 === 'e' || c0 === 'w' ? 0.72 : key.startsWith('head') ? 0.6 : key === 'lean' || key === 'twist' || key === 'tilt' ? 0.85 : 1;
+      const wk = w * (act && act !== 'stumble' && act !== 'bump' ? Math.max(soft, 0.9) : soft), e = Math.exp(-wk * dt);
+      const x0 = this.pose[key] - T[key], v0 = this.pvel[key] || 0, tmp = (v0 + wk * x0) * dt;
       this.pose[key] = T[key] + (x0 + tmp) * e;
-      this.pvel[key] = (v0 - w * tmp) * e;
+      this.pvel[key] = (v0 - wk * tmp) * e;
     }
     this.extraSpin = act && spin !== 0 ? spin : damp(this.extraSpin, 0, 20, dt);
     const P = this.pose;
@@ -1507,17 +1549,16 @@ export class PlayerModel {
     else if (since >= 0.22 && since < 0.45) w = 1 - (since - 0.22) / 0.23; // follow through
     else w = clamp01((L + 1.6 - d) / 1.6) * 0.85; // reaching for it
     if (w <= 0.01) return;
+    // The palm goes onto the ball from above, on the near side (like Shaq / Ben Wallace): aim the hand at the top of
+    // the ball toward the blocker, not the ball's center
+    const toS = this._t.copy(S).sub(T); toS.y = 0; toS.normalize();
+    T.addScaledVector(toS, 0.28); T.y += 0.3;
+    const d1 = S.distanceTo(T);
     // Out of reach: point at it with a straight arm (the target is pulled in to arm's length)
-    if (d > L) T.sub(S).multiplyScalar(L / d).add(S);
+    if (d1 > L) T.sub(S).multiplyScalar(L / d1).add(S);
     this.aimArm(arm, T, w);
-    if (p.blockStyle !== 'one' && p.blockStyle !== 'chase') {
-      const other = arm === this.armR ? this.armL : this.armR;
-      const S2 = other.sh.getWorldPosition(this._s).clone();
-      const T2 = new THREE.Vector3(bp.x, bp.y, bp.z);
-      const d2 = S2.distanceTo(T2);
-      if (d2 > L) T2.sub(S2).multiplyScalar(L / d2).add(S2);
-      this.aimArm(other, T2, w * 0.9);
-    }
+    arm.wr.rotation.x = lerp(arm.wr.rotation.x, 0.85, w); // wrist bent over the ball
+    arm.wr.updateMatrixWorld(true);
   }
 
   // Point an arm at a world-space target: straight when it can't quite reach, elbow bent when close.

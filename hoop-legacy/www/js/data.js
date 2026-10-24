@@ -70,6 +70,16 @@ export function takeoverType(r, playstyle) {
   return Object.keys(score).reduce((a, b) => (score[b] > score[a] ? b : a));
 }
 
+// GOAT skills (pick one): hit the requirement in a game and the skill turns on for 5 game minutes (scaled to
+// your quarter length), maxing out its attributes. It can fire again after it runs out.
+export const GOAT_SKILLS = {
+  finishing:  { name: 'GOAT Finisher', need: 3, req: 'Make 3 layups or dunks', attrs: ['layup', 'dunk', 'close'], color: '#ff5a1f' },
+  shooting:   { name: 'GOAT Shooter', need: 3, req: 'Make 3 jumpers', attrs: ['three', 'mid', 'ft'], color: '#3ddc84' },
+  playmaking: { name: 'GOAT Playmaker', need: 3, req: 'Dish 3 assists', attrs: ['pass', 'handle', 'speed'], color: '#36a3ff' },
+  defense:    { name: 'GOAT Defender', need: 3, req: 'Get 3 steals, blocks or forced misses', attrs: ['perD', 'intD', 'steal', 'block'], color: '#b46bff' },
+  rebounding: { name: 'GOAT Rebounder', need: 4, req: 'Grab 4 rebounds', attrs: ['reb', 'strength', 'vert'], color: '#ffd23f' },
+};
+
 // Dunks that need extra hang time (and start the reach for the rim later)
 export const FLASHY_DUNKS = ['windmill', '360', 'btl', 'windmill2', '360wm', 'cradle'];
 // Dunks finished with one hand (the ball rides in the right palm)

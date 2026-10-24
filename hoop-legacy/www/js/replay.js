@@ -4,7 +4,7 @@ const RATE = 30; // snapshots per second
 const BEFORE = 3.2, AFTER = 1.6;
 const FIELDS = ['action', 'actionT', 'actionDur', 'hasBall', 'holding', 'inbounding', 'post', 'dribblePhase', 'dribbleHand', 'bumpAt',
   'intenseD', 'boxing', 'released', 'shotStyle', 'ft', 'turnaround', 'turnSide', 'dunkStyle', 'releaseAt', 'jumpAtF', 'isUser', 'moveDir',
-  'blockStyle', 'blockHand', 'swatT', 'hitT', 'closeT', 'snatchT', 'y', 'facing', 'heightFt', 'team', 'slot', 'idx', 'benched', 'meterOn', 'meter', 'jumpAt', 'contactVar', 'fallVar', 'anim', 'driftSide', 'toOn', 'toType', 'lastMove', 'euroSide', 'layupStyle'];
+  'blockStyle', 'blockHand', 'swatT', 'hitT', 'closeT', 'snatchT', 'y', 'facing', 'heightFt', 'team', 'slot', 'idx', 'benched', 'meterOn', 'meter', 'jumpAt', 'contactVar', 'fallVar', 'anim', 'driftSide', 'toOn', 'toType', 'lastMove', 'euroSide', 'layupStyle', 'contactSide', 'contestSide'];
 
 const lerp = (a, b, t) => a + (b - a) * t;
 function angLerp(a, b, t) { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return a + d * t; }

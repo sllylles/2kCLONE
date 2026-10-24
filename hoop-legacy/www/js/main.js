@@ -2,7 +2,7 @@
 import { ATTRS, POSITIONS, PLAYSTYLES, DRIBBLE_STYLES, JUMPSHOTS, SKIN_TONES, HAIR, TEAMS, POS_ORDER,
   buildRatings, overall, gradeLetter, gradeColor, upgradeCost, HEIGHT_RANGES, BUILDS, heightIn, fmtHeight,
   BADGES, BADGE_TIERS, BADGE_COLORS, badgeTier, TAKEOVERS, takeoverType, NBA_COMPS, STYLE_ADJ, CAP_FLOOR, CAP_BUDGET,
-  ANIMS, ANIM_CATS, animFor, animAllowed } from './data.js';
+  ANIMS, ANIM_CATS, animFor, animAllowed, GOAT_SKILLS } from './data.js';
 import * as C from './career.js';
 import { Game } from './game.js';
 import { Renderer } from './render.js';
@@ -71,6 +71,16 @@ function tasksHTML(list, stats = null, extra = null, result = null) {
     const done = r ? r.done : n != null && n >= t.n;
     return `<div class="task ${done ? 'done' : ''}"><i>${done ? '✓' : ''}</i><span>${esc(t.text)}${n != null && t.n > 1 && !done ? ` <em>${n}/${t.n}</em>` : ''}</span><b>+${t.ap} AP · +${t.vc} VC</b></div>`;
   }).join('')}</div>`;
+}
+
+// Your rival's season next to yours
+function rivalHTML(c) {
+  const R = c.rival, avg = (o, k) => (o.gp ? o[k] / o.gp : 0).toFixed(1);
+  const team = c.nba ? (R.nbaTeam != null ? TEAMS[R.nbaTeam].name : '') : (C.teamOf(c, R.college) || {}).name || '';
+  return `<div class="rival"><div class="ng-label">RIVAL · ${esc(R.name)} <small>${esc(team)}</small> · H2H ${R.h2h[0]}-${R.h2h[1]}</div>
+    <div class="rv-row"><span>YOU</span><b>${avg(R.me, 'pts')}</b><b>${avg(R.me, 'reb')}</b><b>${avg(R.me, 'ast')}</b></div>
+    <div class="rv-row them"><span>${esc(R.name.split(' ').pop().toUpperCase())}</span><b>${avg(R.stats, 'pts')}</b><b>${avg(R.stats, 'reb')}</b><b>${avg(R.stats, 'ast')}</b></div>
+    <div class="rv-row lbl"><span></span><small>PPG</small><small>RPG</small><small>APG</small></div></div>`;
 }
 
 // Notice banner for menus (outside a game); tap it to run `onTap`
@@ -197,7 +207,7 @@ function renderCreator() {
     m.innerHTML = `<div class="build-reveal"><div class="ng-label">YOUR BUILD</div><div class="br-name">${esc(draft.buildName)}</div>
       <div class="br-pos">${fmtHeight(draft.heightIn)} ${BUILDS[draft.build].name} ${POSITIONS[draft.position].name}</div>
       <div class="br-comp"><small>PLAYS LIKE</small><b>${esc(draft.comp)}</b></div>
-      <small class="hint">${draft.method === 'own' ? `Your potential leans ${STYLE_ADJ[d.style].toLowerCase()} with a ${STYLE_ADJ[d.secondary].toLowerCase()} side.` : PLAYSTYLES[draft.style].desc} Your takeover: ${TAKEOVERS[takeoverType({}, draft.style)].name}.</small></div>
+      <small class="hint">${draft.method === 'own' ? `Your potential leans ${STYLE_ADJ[d.style].toLowerCase()} with a ${STYLE_ADJ[d.secondary].toLowerCase()} side.` : PLAYSTYLES[draft.style].desc}</small></div>
       ${potentialBars(draft.caps, 17)}`;
   } else {
     m.innerHTML = `<h3>SKIN TONE</h3><div class="swatches">${SKIN_TONES.map(c => `<button class="swatch ${draft.skin === c ? 'sel' : ''}" style="background:${c}" data-g="skin" data-k="${c}"></button>`).join('')}</div>
@@ -263,6 +273,36 @@ $('createNext').onclick = () => {
   goCareer();
 };
 
+// ---------------- Interviews ----------------
+// A short sit-down: pick a "brand" answer (fans) or a "team" answer (chemistry) for each question
+function runInterview(key, done) {
+  const iv = C.interviewFor(key), m = $('modal');
+  let q = 0, gotF = 0, gotC = 0;
+  const step = () => {
+    if (q >= iv.qs.length) {
+      const deals = C.activeDeals(career);
+      m.innerHTML = `<div class="ov-card iv"><div class="ng-label">${esc(iv.outlet)}</div><h1>THAT'S A WRAP</h1>
+        <p>+${gotF.toLocaleString()} fans · ${gotC >= 0 ? '+' : ''}${gotC} team chemistry</p>
+        <p class="hint">${(career.fans || 0).toLocaleString()} fans · Chemistry ${career.chem || 0}/100${deals.length ? ' · Deals: ' + deals.map(d => esc(d.name)).join(', ') : ''}</p>
+        <div class="ov-btns"><button class="btn primary" id="ivDone">CONTINUE</button></div></div>`;
+      $('ivDone').onclick = () => { sfx.click(); m.classList.remove('on'); C.saveCareer(career); done(); };
+      return;
+    }
+    const [question, answers] = iv.qs[q];
+    m.innerHTML = `<div class="ov-card iv"><div class="ng-label">${esc(iv.outlet)} · ${esc(iv.who)}</div>${q === 0 ? `<p class="hint">${esc(iv.intro)}</p>` : ''}
+      <h2>"${esc(question)}"</h2><div class="iv-ans">
+      <button class="choice" data-a="0"><b>${esc(answers[0])}</b><small>FANS ↑</small></button>
+      <button class="choice" data-a="1"><b>${esc(answers[1])}</b><small>TEAM CHEMISTRY ↑</small></button></div></div>`;
+    m.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => {
+      sfx.click();
+      const r = C.answerInterview(career, key, q, +b.dataset.a);
+      gotF += r.fans; gotC += r.chem; q++; step();
+    }));
+  };
+  m.classList.add('on');
+  step();
+}
+
 // ---------------- Story ----------------
 function playStory(key, done) {
   const s = C.story(career, key);
@@ -284,6 +324,13 @@ function playStory(key, done) {
 // ---------------- Career routing ----------------
 function goCareer() {
   syncCareerSettings();
+  if (career.pendingInterview && !career.pendingStory) {
+    const k = career.pendingInterview;
+    career.pendingInterview = null;
+    C.saveCareer(career);
+    runInterview(k, goCareer);
+    return;
+  }
   if (career.pendingStory) {
     const k = career.pendingStory;
     career.pendingStory = null;
@@ -317,7 +364,9 @@ function renderHub() {
   else if (c.phase === 'gleague') teamLine = c.gleague.teams[0].name;
   else if (c.nba) teamLine = TEAMS[c.nba.teamId].name + (c.nba.starter ? ' · Starter' : ' · Bench');
   else teamLine = 'Prospect';
-  $('hubCard').innerHTML = cardHTML(P, P.ratings, `<div class="pc-team">${esc(teamLine)}</div>`);
+  const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'K' : String(n);
+  const media = c.fans || c.chem ? `<div class="pc-media">${fmtK(c.fans || 0)} fans · Chemistry ${c.chem || 0}</div>` : '';
+  $('hubCard').innerHTML = cardHTML(P, P.ratings, `<div class="pc-team">${esc(teamLine)}</div>${media}`);
   const info = C.nextGame(c, settings);
   let meter = '';
   if (c.phase === 'hs' || c.phase === 'college') {
@@ -341,6 +390,7 @@ function renderHub() {
     <div class="ng-team">${teamLogo(info.opp)}<b>${esc(info.opp.name)}</b><small>${info.oppOvr} OVR</small></div></div>
     ${info.tag ? `<div class="ng-tag">${esc(info.tag)}</div>` : ''}
     ${meter}
+    ${c.rival && (c.phase === 'college' || c.nba) ? rivalHTML(c) : ''}
     ${tasksHTML(C.gameTasks(c, settings))}</div>
     <div class="ng-btns"><button class="btn ghost" id="btnSim">SIM GAME</button><button class="btn primary" id="btnPlay">PLAY GAME</button></div>`;
   C.saveCareer(c); // keep this game's tasks
@@ -349,6 +399,7 @@ function renderHub() {
     sfx.click();
     confirmModal('Simulate this game? Simmed games earn less AP.', () => {
       const res = C.simulateGame(career, info);
+      res.scale = { q: settings.qLen, season: settings.seasonLength };
       finishMatch(info, res);
     });
   };
@@ -372,7 +423,10 @@ function badgeChip(key, tier) {
 function renderBadges() {
   const c = career, prog = c.badges || {};
   $('listTitle').textContent = 'BADGES';
-  let html = '<p style="color:var(--dim);font-size:12px;margin:0 0 6px">Badges level up as you do things in games. Every tier makes the effect stronger: Bronze, Silver, Gold, Hall of Fame.</p>';
+  const P = c.player;
+  let html = `<div class="up-group">GOAT SKILL</div><p class="hint">Pick one. Hit its requirement in a game and it switches on for 5 game minutes, maxing out its attributes. It can fire again after it runs out.</p>
+    <div class="choices">${Object.entries(GOAT_SKILLS).map(([k, gs]) => `<button class="choice ${P.goat === k ? 'sel' : ''}" data-goat="${k}"><b style="color:${gs.color}">${gs.name}</b><small>${gs.req} → ${gs.attrs.map(a => ATTRS.find(x => x.key === a).name).join(', ')} go to 99</small></button>`).join('')}</div>`;
+  html += '<p style="color:var(--dim);font-size:12px;margin:0 0 6px">Badges level up as you do things in games. Every tier makes the effect stronger: Bronze, Silver, Gold, Hall of Fame.</p>';
   for (const cat of ['Scoring', 'Playmaking', 'Defense']) {
     html += `<div class="up-group">${cat.toUpperCase()}</div><div class="badge-grid">`;
     for (const [k, b] of Object.entries(BADGES)) {
@@ -386,7 +440,8 @@ function renderBadges() {
     html += '</div>';
   }
   $('listBody').innerHTML = html;
-  show('scrList');
+  $('listBody').querySelectorAll('[data-goat]').forEach(b => b.addEventListener('click', () => { sfx.click(); P.goat = b.dataset.goat; C.saveCareer(c); const st = $('listBody').scrollTop; renderBadges(); $('listBody').scrollTop = st; }));
+  if (screenStack[screenStack.length - 1] !== 'scrList') show('scrList');
 }
 $('hubMenu').onclick = () => {
   sfx.click();
@@ -720,7 +775,7 @@ function startMatch(info) {
   game = new Game({
     teams: info.teams, rosters: info.rosters, userTeam: info.userTeam, userSlot: info.slot,
     qLen: settings.qLen, difficulty: settings.difficulty, benchStart: info.benchStart, boost: info.boost,
-    ...C.animOpts(career), playstyle: P.style, defAssist: settings.defAssist, passBias: info.passBias, badges: info.badges, greenBoost: info.greenBoost,
+    ...C.animOpts(career), playstyle: P.style, goat: P.goat || null, intensity: info.intensity || 0, chemTakeover: info.chemTakeover || 0, defAssist: settings.defAssist, passBias: info.passBias, badges: info.badges, greenBoost: info.greenBoost,
     onEvent: onGameEvent,
   });
   game.homeIdx = info.teams.indexOf(info.homeTeam);
@@ -758,8 +813,10 @@ function startMatch(info) {
 let warmup = null;
 function runWarmup(info, done) {
   const c = career, P = c.player;
-  const kind = c.phase === 'hs' && c.hs.round === 0 && !c.history.length ? 'debut' : c.phase === 'hs' && c.hs.round === 2 ? 'trash' : null;
-  const script = kind ? cutscene(kind, game, { school: info.myTeam.name, first: P.name.split(' ')[0] }) : null;
+  const rv = game.players.find(p => p.isRival);
+  const kind = c.phase === 'hs' && c.hs.round === 0 && !c.history.length ? 'debut' : c.phase === 'hs' && c.hs.round === 2 ? 'trash'
+    : rv ? 'rival' : (info.intensity || 0) >= 0.5 ? 'heated' : null;
+  const script = kind ? cutscene(kind, game, { school: info.myTeam.name, first: P.name.split(' ')[0], talker: rv ? rv.idx : null, rivalFirst: rv ? rv.name.split(' ')[0] : '' }) : null;
   warmup = new Warmup(game, renderer, script);
   $('scrGame').classList.add('warming');
   const paint = () => {
@@ -767,9 +824,13 @@ function runWarmup(info, done) {
     overlay(`<div class="wu" id="wuTap">
       <div class="wu-top"><div class="ng-label">${esc(info.label)}</div><b>${s ? '' : 'WARMUPS'}</b></div>
       ${s ? `<div class="wu-cap"><em>${esc(s.speaker)}</em><p>${esc(s.text)}</p></div>` : ''}
-      <div class="wu-hint">${s ? 'TAP TO CONTINUE' : 'TAP TO SKIP'}</div></div>`);
-    $('wuTap').onclick = () => { sfx.click(); if (warmup.shot && warmup.next()) paint(); else finish(); };
+      <div class="wu-hint">TAP TO SKIP</div></div>`);
+    $('wuTap').onclick = () => { sfx.click(); clearTimeout(lineT); if (warmup && warmup.shot) warmup.line = warmup.script.length; finish(); };
+    // The scene plays out on its own: each line stays up long enough to read, then the next one
+    clearTimeout(lineT);
+    if (s) lineT = setTimeout(() => { if (!warmup) return; if (warmup.next()) paint(); else finish(); }, 1800 + s.text.length * 45);
   };
+  let lineT = null;
   let auto = null;
   const finish = () => {
     if (!warmup) return;
@@ -811,7 +872,8 @@ function showHelp(after) {
     <b>Post up</b><span>Push toward the rim to back down. SHOOT (or flick the stick toward SHOOT, hold, and let go) = turnaround fadeaway. Hold the stick toward the rim + SHOOT = hook. Flick for a drop step, ↓ to shimmy, double-tap to spin</span>
     <b>Off the ball</b><span>CALL BALL · ALLEY-OOP · CALL SCREEN (a teammate screens for you) · SET SCREEN (you screen for the ball handler)</span>
     <b>Defense</b><span>BLOCK/REBOUND · STEAL · hold BOX OUT when a shot goes up · hold the DEF ASSIST stick to stay on your man, slowly push it to the edge for intense D, or flick it toward BLOCK or STEAL to do those</span>
-    <b>Takeover</b><span>Buckets, greens, assists, stops, blocks, steals and boards fill your takeover meter (misses and turnovers drain it). Fill it to take over for a stretch: your playstyle picks Shooting, Finishing, Playmaking, Lockdown or Glass. Opposing stars can heat up too.</span>
+    <b>Takeover</b><span>Buckets, greens, assists, stops, blocks, steals and boards fill your takeover meter (misses and turnovers drain it). Fill it to take over for a stretch. The type is whatever you've been doing most that game: Shooting, Finishing, Playmaking, Lockdown or Glass. Opposing stars can heat up too.</span>
+    <b>GOAT skill</b><span>Pick one on the Badges page. Hit its requirement (e.g. 3 made layups/dunks) to max out its attributes for 5 game minutes</span>
     <b>Keyboard</b><span>WASD move · Shift sprint · Space shoot · K pass/box out · L lob/steal · O pick/screen · P post · Z def assist · X intense · Q/E/R/F/T moves</span>
   </div><div class="ov-btns"><button class="btn primary" id="ovOk">GOT IT</button></div></div>`);
   $('ovOk').onclick = () => after();
@@ -870,6 +932,10 @@ function onGameEvent(type, d) {
     case 'poster': renderer.hype = 1.6; markPlay('poster', d.p, d.p.isUser || d.def.isUser ? 10 : 7, 'POSTERIZED!', true); toast(d.p.isUser ? 'POSTERIZED!' : d.def.isUser ? 'YOU GOT POSTERIZED' : 'POSTERIZED!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.6; if (d.p.isUser) vib(90); break;
     case 'stepover': renderer.hype = Math.max(renderer.hype || 0, 1.3); sfx.ooh(); toast(d.p.isUser ? 'STEPPED OVER HIM!' : 'STEPPED OVER!', d.p.team === game.userTeam ? '#ff5a1f' : '#e5484d'); if (d.p.isUser) markPlay('poster', d.p, 9, 'STEP OVER', false); break;
     case 'tipWon': callout(d.team === game.userTeam ? (d.by.isUser ? 'YOU WON THE TIP!' : 'WON THE TIP') : 'LOST THE TIP', d.team === game.userTeam ? '#3ddc84' : '#e5484d'); break;
+    case 'goat': callout(`${d.info.name.toUpperCase()} ACTIVATED!`, d.info.color); toast('GOAT', d.info.color); sfx.cheer(1); vib(60); renderer.hype = Math.max(renderer.hype || 0, 1.2); break;
+    case 'goatProgress': callout(`GOAT ${d.n}/${d.need}`, '#cfd3df'); break;
+    case 'goatEnd': callout('GOAT SKILL OVER', '#9aa3b2'); break;
+    case 'scuffle': renderer.hype = Math.max(renderer.hype || 0, 1.5); renderer.shake = 0.3; sfx.ooh(); toast('SCUFFLE!', '#e5484d'); callout('DOUBLE TECHNICAL', '#ff8a8d'); vib(80); break;
     case 'takeover': {
       const nm = `#${d.p.num} ${d.p.name.split(' ').pop().toUpperCase()}`;
       if (d.p.isUser) {
@@ -964,7 +1030,8 @@ function endMatch() {
   running = false;
   stopCrowd();
   const my = game.userTeam;
-  const res = { stats: { ...game.user.stats }, grade: game.grade, myScore: game.score[my], oppScore: game.score[1 - my], simmed: false, badgeCounts: { ...game.badgeCounts } };
+  const rvp = game.players.find(p => p.isRival);
+  const res = { rivalStats: rvp ? { ...rvp.stats } : null, stats: { ...game.user.stats }, grade: game.grade, myScore: game.score[my], oppScore: game.score[1 - my], simmed: false, badgeCounts: { ...game.badgeCounts } };
   overlay(null);
   finishMatch(matchInfo, res, game);
 }
@@ -989,7 +1056,7 @@ function finishMatch(info, res, g) {
       <div class="ng-label">${esc(info.label)} · vs ${esc(info.opp.name)}</div>
       <div class="statline"><div><b>${s.pts}</b><small>PTS</small></div><div><b>${s.reb}</b><small>REB</small></div><div><b>${s.ast}</b><small>AST</small></div><div><b>${s.stl}</b><small>STL</small></div><div><b>${s.blk}</b><small>BLK</small></div><div><b>${s.fgm}/${s.fga}</b><small>FG</small></div></div>
       ${out.tasks.length ? tasksHTML(out.tasks.map(t => ({ ...t, id: 'pts' })), null, null, out.tasks) : ''}
-      <div class="notes">${out.goals.map(x => `<div class="badge-up" style="border-left-color:var(--gold)">LIFETIME GOAL: ${esc(x.label)} ${x.n.toLocaleString()}${x.who ? ` · passed ${esc(x.who)}` : ''} · +${x.ap} AP +${x.vc.toLocaleString()} VC</div>`).join('')}${out.newAnims.map(a => `<div class="badge-up" style="border-left-color:var(--green)">NEW ANIMATION UNLOCKED: ${esc(a.name)} · equip it on the Animations page</div>`).join('')}${out.badgeUps.map(u => `<div class="badge-up" style="border-left-color:${BADGE_COLORS[u.tier - 1]}">${badgeChip(u.key, u.tier)} NEW BADGE: ${BADGES[u.key].name} (${BADGE_TIERS[u.tier - 1]})</div>`).join('')}${out.boosts.map(b => `<div class="boost">Skill boost: ${esc(b)}</div>`).join('')}${out.notes.map(n => `<div>${esc(n)}</div>`).join('')}</div>
+      <div class="notes">${out.newDeal ? `<div class="badge-up" style="border-left-color:#7cc4ff">NEW ENDORSEMENT: ${esc(out.newDeal.name)} · +${out.newDeal.vc} VC every game</div>` : ''}${out.goals.map(x => `<div class="badge-up" style="border-left-color:var(--gold)">LIFETIME GOAL: ${esc(x.label)} ${x.n.toLocaleString()}${x.who ? ` · passed ${esc(x.who)}` : ''} · +${x.ap} AP +${x.vc.toLocaleString()} VC</div>`).join('')}${out.newAnims.map(a => `<div class="badge-up" style="border-left-color:var(--green)">NEW ANIMATION UNLOCKED: ${esc(a.name)} · equip it on the Animations page</div>`).join('')}${out.badgeUps.map(u => `<div class="badge-up" style="border-left-color:${BADGE_COLORS[u.tier - 1]}">${badgeChip(u.key, u.tier)} NEW BADGE: ${BADGES[u.key].name} (${BADGE_TIERS[u.tier - 1]})</div>`).join('')}${out.boosts.map(b => `<div class="boost">Skill boost: ${esc(b)}</div>`).join('')}${out.notes.map(n => `<div>${esc(n)}</div>`).join('')}</div>
       ${box}
       <div class="ov-btns" style="justify-content:flex-start"><button class="btn primary" id="postGo">CONTINUE</button></div>
     </div>`;
@@ -1065,6 +1132,9 @@ function updateHUD(dt) {
   if (ui.toTxt !== toTxt) { $('huTOName').textContent = toTxt; $('huTO').classList.toggle('on', u.toOn); ui.toTxt = toTxt; }
   $('huTOFill').style.width = (u.toMeter * 100).toFixed(1) + '%';
   $('huTOFill').style.background = to.color;
+  const gs = g.opts.goat && GOAT_SKILLS[g.opts.goat];
+  const gtxt = !gs ? '' : u.goatOn ? `${gs.name.toUpperCase()} · ${Math.ceil(Math.max(0, u.goatUntil - g.time))}s` : `GOAT ${u.goatN || 0}/${gs.need}`;
+  if (ui.gtxt !== gtxt) { $('huGoat').textContent = gtxt; $('huGoat').style.color = u.goatOn ? gs.color : ''; ui.gtxt = gtxt; }
   const mu = g.matchup(u);
   const mtxt = mu ? `${g.offense === u.team ? 'GUARDED BY' : 'GUARDING'} #${mu.num} ${mu.name.split(' ').pop().toUpperCase()}` : '';
   if (ui.mtxt !== mtxt) { $('huMatch').textContent = mtxt; ui.mtxt = mtxt; }

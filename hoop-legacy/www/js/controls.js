@@ -174,6 +174,9 @@ export class Controls {
           sp.fired = true; sp.shooting = true; this.held.a = true; this.edges.aDown = true; this.buzz(12);
         } else if (this.mode === 'ball' || this.mode === 'post') {
           sp.fired = true;
+          // Keep holding the stick after the flick = holding SHOOT (euro steps / floaters fill the meter
+          // while you hold, let go to release)
+          sp.shooting = true; this.held.a = true;
           this.gesture = { type: 'swipe', x: mx, z: my };
           this.showTrail(trail, e.clientX, e.clientY, mx, my);
           this.buzz(12);

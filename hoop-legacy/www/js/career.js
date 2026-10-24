@@ -244,6 +244,55 @@ function updateLifeGoals(c, s, scale) {
   return out;
 }
 
+// ---------- Media: interviews, fans, chemistry, endorsements ----------
+// Every interview is a few questions with a "brand" answer (grows fans) and a "team" answer (grows chemistry).
+// Fans bring endorsement deals (VC every game); chemistry makes your teammates better.
+export const DEALS = [
+  { fans: 15000, name: 'Local sneaker shop', vc: 100 },
+  { fans: 60000, name: 'Sports drink sponsor', vc: 250 },
+  { fans: 200000, name: 'Signature shoe deal', vc: 600 },
+  { fans: 600000, name: 'Global brand ambassador', vc: 1200 },
+];
+const INTERVIEWS = {
+  college: { who: 'Dre Banks', outlet: 'Hoop Central (YouTube, 2.1M subs)', intro: 'A camera crew catches you outside the gym on your first day on campus.', qs: [
+    ['Everybody\'s calling you the best freshman in the country. You agree?', ['Put it this way: they\'re going to need a bigger word than "best".', 'I haven\'t done anything yet. My teammates and I have a lot of work to do.']],
+    ['What\'s the one thing people don\'t know about your game?', ['That I\'m the most exciting player they\'ll ever pay to watch.', 'How much I like making the extra pass. Winning is what gets you noticed.']],
+    ['Message to your future rival?', ['Tell him to watch my channel. He might learn something.', 'Respect. We\'ll handle it on the court.']],
+  ] },
+  draft: { who: 'Press room', outlet: 'Draft night press conference', intro: 'Cameras flash as you sit down at the podium in your new hat.', qs: [
+    ['How does it feel to be a pro?', ['Feels like the start of my brand. This city just got a superstar.', 'Grateful. I just want to earn my teammates\' trust.']],
+    ['What do you bring to this team on day one?', ['Highlights. Sell-outs. A jersey everybody\'s buying.', 'Whatever the coach needs. Defense, energy, the dirty work.']],
+  ] },
+  postgame: { who: 'Courtside reporter', outlet: 'Postgame interview', intro: 'A reporter grabs you on the way to the locker room.', qs: [
+    ['Big night for you. What was working?', ['Everything. When I\'m like this nobody can guard me.', 'My guys found me in the right spots. Credit to them.']],
+    ['Fans were chanting your name. How did that feel?', ['That\'s my house now. Get used to it.', 'Love our fans. Let\'s keep stacking wins for them.']],
+  ] },
+  slump: { who: 'Beat writer', outlet: 'Media availability', intro: 'After a rough stretch, the beat writers want answers.', qs: [
+    ['You\'ve been off lately. What\'s going on?', ['Nothing. Bad nights happen. I\'m still the best player on the floor.', 'That\'s on me. I\'ll be in the gym and I\'ll be better for this team.']],
+    ['Any frustration with your role?', ['I want the ball more. I\'m the one people pay to see.', 'No. We win together. I trust what the coach is doing.']],
+  ] },
+  playoffs: { who: 'National TV', outlet: 'Playoff press conference', intro: 'The lights are brighter now. The whole country is listening.', qs: [
+    ['Is this the moment you become a household name?', ['I already am. After this series, everybody\'s wearing my shoe.', 'Only thing I\'m thinking about is getting four wins with these guys.']],
+    ['Any words for the other team?', ['They know what\'s coming. They\'ve seen the highlights.', 'Great team. We respect them. We\'ll be ready.']],
+  ] },
+};
+export function interviewFor(key) { return INTERVIEWS[key]; }
+// Pick answer i (0 = brand, 1 = team) on question q: returns what changed
+export function answerInterview(c, key, q, i) {
+  c.fans = c.fans || 0; c.chem = c.chem || 0;
+  const scale = c.nba ? 3 : 1;
+  const before = c.chem;
+  if (i === 0) { const f = Math.round((3000 + Math.random() * 4000) * scale * (key === 'playoffs' ? 2 : 1)); c.fans += f; c.chem = Math.max(0, c.chem - 2); return { fans: f, chem: c.chem - before }; }
+  c.chem = Math.min(100, c.chem + (key === 'playoffs' ? 8 : 5)); const f = Math.round(600 * scale); c.fans += f; return { fans: f, chem: c.chem - before };
+}
+export function activeDeals(c) { return DEALS.filter(d => (c.fans || 0) >= d.fans); }
+// Teammate buffs from chemistry: small rating bumps, and at high chemistry they start games with a head start
+// on their takeover
+export function chemBuff(c) {
+  const ch = c.chem || 0;
+  return { shoot: Math.round(ch / 100 * 5), def: ch >= 40 ? Math.round((ch - 40) / 60 * 5) : 0, takeover: ch >= 75 ? 0.5 : 0 };
+}
+
 // ---------- Game tasks ----------
 const TASK_POOL = {
   pts: { text: n => `Score ${n}+ points`, stat: s => s.pts, base: m => Math.max(4, Math.round(m * 0.22)) },
@@ -359,8 +408,14 @@ export function collegeOffers(c) {
 export function chooseCollege(c, id) {
   const team = COLLEGES.find(t => t.id === id);
   c.college = { team: { ...team }, year: 1, games: [], record: [0, 0], schedule: shuffle(COLLEGES.filter(t => t.id !== id)).slice(0, 4).map(t => t.id), idx: 0, tourney: null };
+  // Your rival: same position, another top program, a little better than you on paper. You play them twice.
+  const rt = c.college.schedule[1];
+  c.college.schedule.push(rt);
+  c.rival = { name: randName(), num: Math.floor(Math.random() * 45), position: c.player.position, college: rt, nbaTeam: null,
+    ovrEdge: 3, stats: { gp: 0, pts: 0, reb: 0, ast: 0 }, me: { gp: 0, pts: 0, reb: 0, ast: 0 }, h2h: [0, 0], met: 0 };
   c.phase = 'college';
   c.pendingStory = 'college';
+  c.pendingInterview = 'college';
   c.offers = null;
 }
 
@@ -455,8 +510,10 @@ export function runDraft(c) {
 }
 
 export function joinNBA(c, teamId, via) {
+  c.pendingInterview = 'draft';
+  if (c.rival && c.rival.nbaTeam == null) c.rival.nbaTeam = TEAMS.filter(t => t.id !== teamId)[Math.floor(Math.random() * (TEAMS.length - 1))].id;
   c.nba = {
-    teamId, starter: false, trust: 0, rookieBoost: 5, gp: 0, record: [0, 0],
+    rivalry: {}, teamId, starter: false, trust: 0, rookieBoost: 5, gp: 0, record: [0, 0],
     schedule: makeSchedule(teamId, c), gameIdx: 0, standings: Object.fromEntries(TEAMS.map(t => [t.id, [0, 0]])), via,
   };
   c.phase = 'nba';
@@ -553,8 +610,27 @@ export function nextGame(c, settings) {
     name: P.name, num: P.num, position: P.position, ratings: { ...P.ratings }, heightFt: P.heightFt,
     skin: P.skin, hair: P.hair, shoe: '#ffffff', headband: P.headband, sleeve: P.sleeve, ovr: userOverall(c), build: P.build || 'athletic',
   };
+  // Rivalry game: your rival suits up for them (at your position), and in the NBA every team has a rivalry meter
+  const R = c.rival;
+  let rival = null, intensity = 0;
+  if (R && ((c.phase === 'college' && opp.id === R.college) || (c.nba && R.nbaTeam === opp.id))) {
+    const rr = generateRoster(opp.id, oppOvr + R.ovrEdge, seed + 7)[slot];
+    oppRoster[slot] = { ...rr, name: R.name, num: R.num, position: P.position, ovr: Math.max(rr.ovr || 0, userOverall(c) + R.ovrEdge), isRival: true };
+    rival = { name: R.name, num: R.num };
+    tag = `RIVALRY GAME: ${R.name} and ${opp.name}. He starts the game heated up.` + (tag ? ' ' + tag : '');
+    intensity = 0.5;
+  }
+  if (c.nba) {
+    const rv = (c.nba.rivalry || {})[opp.id] || 0;
+    intensity = Math.max(intensity, rv / 100);
+    if (c.phase === 'playoffs' && /Finals/.test(c.playoffs.roundName)) intensity = Math.min(1, intensity + 0.5);
+    if (rv >= 40 && !rival) tag = `Rivalry: ${rv}% · Things are getting heated with ${opp.name}.` + (tag ? ' ' + tag : '');
+  }
+  const cb = chemBuff(c);
+  if (cb.shoot || cb.def) myRoster.forEach((pl, i) => { if (i === slot) return; const r2 = pl.ratings = { ...pl.ratings }; for (const k of ['three', 'mid', 'close']) r2[k] = Math.min(99, r2[k] + cb.shoot); for (const k of ['perD', 'intD', 'steal']) r2[k] = Math.min(99, r2[k] + cb.def); });
   const home = Math.random() < 0.5;
   return {
+    rival, intensity, chemTakeover: cb.takeover,
     myTeam, opp, label, tag, benchStart, boost, passBias, apMult, slot, greenBoost,
     teams: home ? [myTeam, opp] : [opp, myTeam],
     rosters: home ? [myRoster, oppRoster] : [oppRoster, myRoster],
@@ -674,6 +750,33 @@ export function applyResult(c, info, res) {
     if (sr.wins[0] >= need) advancePlayoffs(c, out, true);
     else if (sr.wins[1] >= need) advancePlayoffs(c, out, false);
     else out.notes.push(`Series: ${sr.wins[0]}-${sr.wins[1]}`);
+  }
+  if (c.rival && (c.phase === 'college' || c.nba)) {
+    // Your rival keeps putting up numbers every week too
+    // (simulated lines are scaled to your quarter length so the comparison is fair)
+    const sc = ((res.scale && res.scale.q) || 3) / 12 * (res.simmed ? 1 : 1);
+    const R = c.rival, rs = res.rivalStats || { pts: Math.round((14 + Math.random() * 14) * sc), reb: Math.round((3 + Math.random() * 6) * sc), ast: Math.round((2 + Math.random() * 6) * sc) };
+    R.stats.gp++; for (const k of ['pts', 'reb', 'ast']) R.stats[k] += rs[k];
+    R.me.gp++; for (const k of ['pts', 'reb', 'ast']) R.me[k] += s[k];
+    if (info.rival) { R.met++; R.h2h[win ? 0 : 1]++; out.notes.push(win ? `You beat ${R.name} head to head (${R.h2h[0]}-${R.h2h[1]}).` : `${R.name} got this one (${R.h2h[0]}-${R.h2h[1]}).`); }
+  }
+  if (c.nba) {
+    const rv = c.nba.rivalry = c.nba.rivalry || {};
+    const close = Math.abs(res.myScore - res.oppScore) <= 6;
+    rv[info.opp.id] = Math.min(100, (rv[info.opp.id] || 0) + 6 + (close ? 6 : 0) + (c.phase === 'playoffs' ? 12 : 0) + (info.rival ? 8 : 0));
+    if (rv[info.opp.id] >= 60) out.notes.push(`Rivalry with ${info.opp.name}: ${rv[info.opp.id]}%`);
+  }
+  // Endorsements pay every game; the press wants to talk after big nights, slumps and in the playoffs
+  const deals = activeDeals(c);
+  if (deals.length) { const dv = deals.reduce((t, d) => t + d.vc, 0); c.vc += dv; out.vc += dv; out.notes.push(`Endorsements: +${dv} VC (${deals.map(d => d.name).join(', ')})`); }
+  const prevDeals = c.dealsSeen || 0;
+  if (deals.length > prevDeals) { out.newDeal = deals[deals.length - 1]; c.dealsSeen = deals.length; }
+  if (c.nba && !c.pendingInterview) {
+    c.media = (c.media || 0) + 1;
+    const big = s.pts >= Math.max(8, ((res.scale && res.scale.q) || 3) * 3.5);
+    if (c.phase === 'playoffs' && c.media >= 2) { c.pendingInterview = 'playoffs'; c.media = 0; }
+    else if (big && c.media >= 3) { c.pendingInterview = 'postgame'; c.media = 0; }
+    else if (!win && c.media >= 6) { c.pendingInterview = 'slump'; c.media = 0; }
   }
   out.goals = updateLifeGoals(c, s, res.scale || {});
   if (c.anims) out.newAnims = checkAnimUnlocks(c);

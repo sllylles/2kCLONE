@@ -1,5 +1,5 @@
 // Basketball match simulation: 5v5 full court, user controls one player (MyCareer style).
-import { DRIBBLE_STYLES, JUMPSHOTS, FLASHY_DUNKS, TAKEOVERS, animProfile, takeoverType, clamp, reachOf } from './data.js';
+import { DRIBBLE_STYLES, JUMPSHOTS, FLASHY_DUNKS, TAKEOVERS, GOAT_SKILLS, animProfile, takeoverType, clamp, reachOf } from './data.js';
 
 export const HOOP_X = 41.75;
 export const RIM_Y = 10;
@@ -57,6 +57,11 @@ export class Game {
       });
     }));
     this.user = this.players.find(p => p.isUser);
+    this.intensity = opts.intensity || 0; this.lastScuffle = -99;
+    // Team chemistry (from interviews): teammates start with a head start on their takeovers
+    if (opts.chemTakeover && this.user) for (const p of this.players) if (p.team === this.user.team && !p.isUser) p.toMeter = opts.chemTakeover;
+    // Your rival comes out heated: takeover on from the tip, held through the whole first quarter
+    for (const p of this.players) if (p.isRival) { p.toOn = true; p.toMeter = 1; p.toQ1 = true; }
     for (const t of [0, 1]) {
       const best = Math.max(...this.players.filter(p => p.team === t).map(p => p.ovr || 0));
       for (const p of this.players) if (p.team === t) p.toStar = (p.ovr || 0) >= best - 1;
@@ -125,8 +130,15 @@ export class Game {
   // Good plays fill the meter, bad ones drain it. Full: you take over for a stretch (it drains over ~20s, and
   // good plays keep it going). Everyone has one, but only stars fill theirs at a real rate.
   toIs(p, type) { return !!(p && p.toOn && p.toType === type); }
-  toGain(p, amt) {
+  // `cat` = what kind of play it was: your takeover becomes whatever you've been doing the most
+  // (2K-style: slash a lot and you get a Finishing takeover, lock people up and you get Lockdown)
+  toGain(p, amt, cat = null) {
     if (!p || p.benched || this.phase === 'over') return;
+    if (cat && amt > 0) {
+      p.toAct = p.toAct || {};
+      p.toAct[cat] = (p.toAct[cat] || 0) + amt;
+      if (p.isUser && !p.toOn) p.toType = Object.keys(p.toAct).reduce((a, b) => (p.toAct[b] > p.toAct[a] ? b : a));
+    }
     if (amt > 0) {
       // AI: the team's best players heat up, role players rarely; tougher when you're a star yourself
       const rate = p.isUser ? 1 : clamp(((p.ovr || 70) - 62) / 20, 0.15, 1) * (p.toStar ? 1 : 0.55) * (0.8 + this.heat * 0.4);
@@ -139,11 +151,31 @@ export class Game {
       this.emit('takeover', { p, type: p.toType, info: TAKEOVERS[p.toType] });
     }
   }
+  // GOAT skill progress for the user (cat = finishing / shooting / playmaking / defense / rebounding)
+  goatHit(p, cat) {
+    if (!p || !p.isUser || !this.opts.goat || this.opts.goat !== cat || p.goatOn) return;
+    const G = GOAT_SKILLS[cat];
+    p.goatN = (p.goatN || 0) + 1;
+    if (p.goatN >= G.need) {
+      p.goatN = 0; p.goatOn = true; p.goatUntil = this.time + this.qLen * 5 / 12;
+      p.goatSaved = {};
+      for (const k of G.attrs) { p.goatSaved[k] = p.r[k]; p.r[k] = 99; }
+      this.emit('goat', { p, info: G });
+    } else this.emit('goatProgress', { p, n: p.goatN, need: G.need });
+  }
   updateTakeovers(dt) {
+    if (this.pending2) { this.p2t = (this.p2t || 0) + dt; if (this.p2t > 1.6) { const f = this.pending2; this.pending2 = null; this.p2t = 0; f(); } }
+    const u = this.user;
+    if (u && u.goatOn && this.time >= u.goatUntil) {
+      for (const k in u.goatSaved) u.r[k] = u.goatSaved[k];
+      u.goatOn = false; u.goatSaved = null;
+      this.emit('goatEnd', { p: u });
+    }
     for (const p of this.players) {
+      if (p.toQ1) { if (this.quarter === 1) { p.toMeter = 1; continue; } p.toQ1 = false; }
       if (p.toOn) {
         p.toMeter -= dt / 20;
-        if (p.toMeter <= 0) { p.toMeter = 0; p.toOn = false; this.emit('takeoverEnd', { p }); }
+        if (p.toMeter <= 0) { p.toMeter = 0; p.toOn = false; p.toAct = {}; this.emit('takeoverEnd', { p }); }
       } else if (p.toMeter > 0 && this.time - (p.toLast || 0) > 25) p.toMeter = Math.max(0, p.toMeter - dt * 0.002); // cools off when quiet
     }
   }
@@ -162,9 +194,12 @@ export class Game {
   startBlock(p, rebound = false) {
     this.setAction(p, rebound ? 'rebound' : 'block', 0.75);
     p.vy = 11 + p.r.vert * 0.06;
-    p.blockStyle = chance(0.5) ? 'one' : 'two';
-    p.blockHand = chance(0.6) ? 'R' : 'L';
+    p.blockStyle = chance(0.8) ? 'one' : 'two';
     const s = this.ball.holder && this.ball.holder.team !== p.team ? this.ball.holder : null;
+    // Block with the hand on the ball's side
+    const bp = this.ball.vis || this.ball.pos;
+    if (bp) { const fx = Math.sin(p.facing), fz = Math.cos(p.facing), lx = bp.x - p.pos.x, lz = bp.z - p.pos.z; p.blockHand = (lx * fz - lz * fx) > 0 ? 'L' : 'R'; }
+    else p.blockHand = chance(0.6) ? 'R' : 'L';
     if (s && this.isBehind(p, s)) p.blockStyle = 'chase';
   }
 
@@ -221,6 +256,7 @@ export class Game {
     this.tip = { t: 0, jumped: {}, userJumpAt: null };
     this.phase = 'tip';
     this.emit('tipoff', {});
+    for (const p of this.players) if (p.isRival) this.emit('takeover', { p, type: p.toType, info: TAKEOVERS[p.toType] });
   }
   updateTip(dt, input) {
     const T = this.tip, b = this.ball;
@@ -643,7 +679,7 @@ export class Game {
 
   stealSuccess(def, h) {
     h.stats.tov++; def.stats.stl++; this.bc(def, 'interceptor');
-    this.toGain(def, 0.18); this.toGain(h, -0.08);
+    this.toGain(def, 0.18, 'lockdown'); this.toGain(h, -0.08); this.goatHit(def, 'defense');
     if (h.isUser) this.addGrade(-3, 'Turnover');
     if (def.isUser) this.addGrade(2.5, 'Steal');
     this.emit('steal', { def, h });
@@ -658,7 +694,16 @@ export class Game {
     b.noGrab = { p: h, until: this.time + 0.45, all: this.time + 0.05 };
   }
 
+  // Heated games (rivalries, the Finals): a hard play can turn into a shoving match. Both get a technical.
+  maybeScuffle(a, b, base = 0.25) {
+    if (!a || !b || a.team === b.team || this.intensity < 0.35 || this.time - this.lastScuffle < 45 || !chance(this.intensity * base)) return;
+    this.lastScuffle = this.time;
+    this.knock(a, b.pos, 4, 'bump', 0.6); this.knock(b, a.pos, 4, 'bump', 0.6);
+    a.stats.pf++; b.stats.pf++;
+    this.emit('scuffle', { a, b });
+  }
   foul(def, off, shooting, made = false, pts = 2) {
+    if (shooting) this.maybeScuffle(off, def, 0.2);
     def.stats.pf++;
     this.teamFouls[def.team]++;
     if (def.isUser) this.addGrade(-1, 'Foul');
@@ -798,10 +843,10 @@ export class Game {
             this.setAction(def, 'fall', 1.7); def.stun = 1.7; def.fallVar = chance(0.5) ? 1 : 0;
             if (p.isUser) this.addGrade(1.5, 'Ankle breaker');
             this.emit('ankle', { p, def }); this.bc(p, 'ankleBreaker', 3);
-            this.toGain(p, 0.15); this.toGain(def, -0.06);
+            this.toGain(p, 0.15, 'playmaking'); this.toGain(def, -0.06);
           } else {
             this.setAction(def, 'stumble', 0.7); def.stun = 0.7;
-            this.emit('beat', { p, def }); this.bc(p, 'ankleBreaker'); this.toGain(p, 0.04);
+            this.emit('beat', { p, def }); this.bc(p, 'ankleBreaker'); this.toGain(p, 0.04, 'playmaking');
           }
         }
       }
@@ -882,6 +927,8 @@ export class Game {
     // fadeaway, sideways is a drifting jumper (shoulders square, body carrying across), attacking is a pull-up.
     const spd0 = len(p.vel.x, p.vel.z);
     p.shotVel = null; p.driftSide = 0; p.takeoffVel = null;
+    const cs0 = ft ? { side: 0 } : this.contactSideOf(p, 4.5);
+    p.contestSide = cs0.side ? -cs0.side : 0; // lean away from him
     if (!ft && !fromPost && spd0 > 6 && (!style || style === 'fade')) {
       const h = this.hoopOf(p.team), hx = h.x - p.pos.x, hz = h.z - p.pos.z, hl = len(hx, hz) || 1;
       const along = (p.vel.x * hx + p.vel.z * hz) / (hl * spd0);
@@ -1087,9 +1134,20 @@ export class Game {
     if (p.isUser) { p.meterOn = true; p.meter = 0; this.emit('meterStart', { p }); }
   }
 
+  // Defender right in front / on the hip as you go up: which side (+1 = on your left), or 0
+  contactSideOf(p, range) {
+    const { q, d } = this.nearestDefender(p);
+    if (!q || d > range || q.stun > 0) return { side: 0, q: null };
+    const fx = Math.sin(p.facing), fz = Math.cos(p.facing), lx = q.pos.x - p.pos.x, lz = q.pos.z - p.pos.z;
+    if ((lx * fx + lz * fz) / (d || 1) < -0.3) return { side: 0, q: null }; // behind him
+    return { side: (lx * fz - lz * fx) > 0 ? 1 : -1, q };
+  }
+
   startFinish(p, type) {
     this.setAction(p, type, type === 'dunk' ? 1.1 : 0.8);
     p.layupStyle = null;
+    const cs = type === 'layup' ? this.contactSideOf(p, 4) : { side: 0 };
+    p.contactSide = cs.side; p.contactQ = cs.q;
     p.releaseAt = type === 'dunk' ? 0.64 : 0.44;
     p.meterOn = false;
     p.extraHops = false;
@@ -1196,6 +1254,16 @@ export class Game {
       const legs = clamp((p.r.vert + p.r.strength) / 2 - 50, 0, 40) / 400;
       prob = 0.88 + p.r.dunk / 99 * 0.1 + legs - dc * (0.32 - p.r.dunk / 99 * 0.12);
     }
+    else if (kind === 'layup' && p.contactSide && p.contactQ) {
+      // Contact layup: strength decides who gives ground. Stronger: he's knocked off you and the contest barely
+      // matters; weaker: you get bumped off line
+      const q = p.contactQ, edge = p.r.strength - q.r.strength + (this.toIs(p, 'finishing') ? 15 : 0);
+      const absorb = clamp(0.5 + edge / 60, 0.1, 0.95);
+      prob = (0.5 + p.r.layup / 99 * 0.42) * (1 - 0.45 * c * (1 - absorb));
+      if (edge >= 6) { this.knock(q, p.pos, 3 + edge / 10, 'stumble', 0.5); q.stun = Math.max(q.stun, 0.4); }
+      else p.hitT = Math.max(p.hitT, 0.35);
+      this.emit('contact', { p, power: 3 });
+    }
     else if (kind === 'layup' && p.layupStyle === 'floater') prob = (0.34 + p.r.close / 99 * 0.46) * (1 - 0.22 * c);
     else if (kind === 'layup') prob = (0.5 + p.r.layup / 99 * 0.42) * (1 - 0.4 * c * (this.toIs(p, 'finishing') ? 0.45 : 1) * (1 - this.bt(p, 'acrobat') * 0.12)) * (1 + this.bt(p, 'acrobat') * 0.03);
     else {
@@ -1263,6 +1331,7 @@ export class Game {
         p.stepOver = p.r.dunk >= 90 && chance(0.45) ? contester : null;
       }
       this.emit('poster', { p, def: contester }); this.bc(p, 'posterizer', 2);
+      this.pending2 = () => this.maybeScuffle(contester, p, 0.45);
       if (p.isUser) this.addGrade(2, 'Posterized');
     } else if (foul) {
       // Visible contact on the foul
@@ -1331,8 +1400,10 @@ export class Game {
       if (s.kind === 'jumper' && s.contest > 0.5) this.bc(p, 'deadeye');
       if (s.kind === 'jumper' && s.style) this.bc(p, 'fadeAce');
       if (s.assister) { s.assister.stats.ast++; if (s.assister.isUser) this.addGrade(2.5, 'Assist'); this.bc(s.assister, 'dimer'); }
-      this.toGain(p, 0.2 + (s.three ? 0.06 : 0) + (s.quality === 'perfect' ? 0.08 : 0) + (s.kind === 'dunk' ? 0.06 : 0));
-      if (s.assister) this.toGain(s.assister, 0.14);
+      this.goatHit(p, s.kind === 'jumper' ? 'shooting' : 'finishing');
+      if (s.assister) this.goatHit(s.assister, 'playmaking');
+      this.toGain(p, 0.2 + (s.three ? 0.06 : 0) + (s.quality === 'perfect' ? 0.08 : 0) + (s.kind === 'dunk' ? 0.06 : 0), s.kind === 'jumper' ? 'shooting' : 'finishing');
+      if (s.assister) this.toGain(s.assister, 0.14, 'playmaking');
       this.toGain(this.opp(p), -0.03);
       if (p.isUser) this.addGrade(s.three ? 3.5 : 2.5, s.three ? 'Made 3' : 'Made shot');
       const defender = this.opp(p);
@@ -1350,7 +1421,7 @@ export class Game {
       this.emit('rim', {});
       if (!last) { b.state = 'dead'; b.vel = { x: -s.side * 4, y: 6, z: rand(-2, 2) }; return; }
     }
-    if (s.kind !== 'ft') { this.toGain(p, -0.03); if (s.contest > 0.45) this.toGain(this.opp(p), 0.06); }
+    if (s.kind !== 'ft') { this.toGain(p, -0.03); if (s.contest > 0.45) { this.toGain(this.opp(p), 0.06, 'lockdown'); this.goatHit(this.opp(p), 'defense'); } }
     if (s.foulPending) { this.foul(s.foul, p, true, false, s.pts); b.state = 'dead'; return; }
     if (s.missOff > 1.5) {
       // Airball / off the side: keep flying
@@ -2124,7 +2195,7 @@ export class Game {
   blockShot(def, shooter) {
     shooter.released = true;
     def.swatT = this.time;
-    this.toGain(def, 0.18); this.toGain(shooter, -0.04);
+    this.toGain(def, 0.18, 'lockdown'); this.toGain(shooter, -0.04); this.goatHit(def, 'defense');
     const chaseDown = this.isBehind(def, shooter) && (shooter.action === 'layup' || shooter.action === 'dunk');
     const close = this.distHoop(shooter) < 12;
     const snatchP = clamp(0.08 + (def.r.block - 60) / 110 + (close ? 0.08 : 0) + this.bt(def, 'rimProtector') * 0.04, 0, 0.45);
@@ -2161,8 +2232,15 @@ export class Game {
       const stopAt = t => len(def.pos.x + ox / hz * t - shooter.pos.x, def.pos.z + oz / hz * t - shooter.pos.z);
       while (close > 0 && stopAt(close) < 2.0) close -= 0.1;
       if (close > 0) { def.pos.x += ox / hz * close; def.pos.z += oz / hz * close; }
-      const rx = start.x - def.pos.x, rz = start.z - def.pos.z, rl = Math.hypot(rx, oy, rz) || 1;
-      if (rl > armL) { const f = armL / rl; start.x = def.pos.x + rx * f; start.y = shY + oy * f; start.z = def.pos.z + rz * f; }
+      // Still short: he gets up higher to it (the hand goes to the ball, the ball stays in the shooter's hands)
+      let rx = start.x - def.pos.x, rz = start.z - def.pos.z, oy2 = start.y - shY, rl = Math.hypot(rx, oy2, rz) || 1;
+      if (rl > armL && oy2 > 0) {
+        const hz2 = Math.hypot(rx, rz), needY = Math.sqrt(Math.max(0, armL * armL - hz2 * hz2));
+        const lift = Math.min(1.4, oy2 - needY);
+        if (lift > 0) { def.y += lift; oy2 -= lift; rl = Math.hypot(rx, oy2, rz) || 1; }
+      }
+      // Whatever is left (rare) is a few inches: meet in the middle
+      if (rl > armL) { const f = armL / rl, shY2 = start.y - oy2; start.x = def.pos.x + rx * f; start.y = shY2 + oy2 * f; start.z = def.pos.z + rz * f; }
     }
     b.pos = start;
     b.vis = { ...start };
@@ -2174,6 +2252,7 @@ export class Game {
     } else b.vel = { x: dx / l * rand(10, 18), y: rand(2, 8), z: dz / l * rand(10, 18) + rand(-4, 4) };
     this.shotClock = Math.max(this.shotClock, 1);
     this.emit('block', { def, shooter, type: chaseDown ? 'chase' : 'swat' });
+    this.maybeScuffle(shooter, def, 0.2);
   }
 
   charge(handler, def) {
@@ -2337,7 +2416,7 @@ export class Game {
             if (chance(clamp(pi, 0.03, 0.55))) {
               if (ps.from) { ps.from.stats.tov++; if (ps.from.isUser) this.addGrade(-3, 'Turnover'); }
               q.stats.stl++; this.bc(q, 'interceptor');
-              this.toGain(q, 0.18); this.toGain(ps.from, -0.08);
+              this.toGain(q, 0.18, 'lockdown'); this.toGain(ps.from, -0.08); this.goatHit(q, 'defense');
               if (q.isUser) this.addGrade(2.5, 'Steal');
               this.emit('steal', { def: q, h: ps.from, intercept: true });
               this.giveBall(q, false);
@@ -2425,7 +2504,7 @@ export class Game {
     const off = p.team === this.offense;
     if (wasShot) {
       p.stats.reb++; if (off) p.stats.oreb++; this.bc(p, 'rebound');
-      this.toGain(p, off ? 0.1 : 0.07);
+      this.toGain(p, off ? 0.1 : 0.07, 'glass'); this.goatHit(p, 'rebounding');
       if (p.isUser) this.addGrade(off ? 2 : 1.5, off ? 'Offensive rebound' : 'Rebound');
       this.emit('rebound', { p, off });
     }

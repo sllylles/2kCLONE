@@ -256,7 +256,11 @@ export class Renderer {
     this.quality = quality;
     this.r = new THREE.WebGLRenderer({ canvas, antialias: quality !== 'low', powerPreference: 'high-performance' });
     this.r.outputColorSpace = THREE.SRGBColorSpace;
-    this.r.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality === 'high' ? 2.5 : quality === 'med' ? 1.75 : 1.25));
+    // Resolution: the setting's ceiling, then adapted to how the device keeps up (see adapt())
+    this.prMax = Math.min(window.devicePixelRatio || 1, quality === 'high' ? 2.5 : quality === 'med' ? 1.75 : 1.25);
+    this.prMin = Math.min(this.prMax, 0.85);
+    this.r.setPixelRatio(this.prMax);
+    this.slowT = 0; this.fastT = 0; this.adaptCool = 0;
     this.r.shadowMap.enabled = quality === 'high';
     this.r.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene();
@@ -351,6 +355,39 @@ export class Renderer {
       new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.35, depthWrite: false }));
     this.ballShadow.rotation.x = -Math.PI / 2;
     s.add(this.ballShadow);
+  }
+
+  // Keep the frame rate up: when frames run long for a while, lower the render resolution a step (and drop
+  // shadows); when there's plenty of headroom again, bring it back up. Called once per frame with real dt.
+  adapt(dt) {
+    if (!(dt > 0) || dt > 0.25) return; // ignore pauses / tab switches
+    this.adaptCool -= dt;
+    const ms = dt * 1000;
+    this.slowT = ms > 21 ? this.slowT + dt : Math.max(0, this.slowT - dt * 0.5);
+    this.fastT = ms < 15 ? this.fastT + dt : 0;
+    if (this.adaptCool > 0) return;
+    const pr = this.r.getPixelRatio();
+    if (this.slowT > 1.2) {
+      this.slowT = 0; this.adaptCool = 1.5;
+      if (this.r.shadowMap.enabled) { this.r.shadowMap.enabled = false; this.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; }); }
+      else if (pr > this.prMin + 0.01) this.setPR(Math.max(this.prMin, pr * 0.82));
+    } else if (this.fastT > 6 && pr < this.prMax - 0.01) {
+      this.fastT = 0; this.adaptCool = 3;
+      this.setPR(Math.min(this.prMax, pr * 1.12));
+    }
+  }
+  setPR(pr) {
+    this.r.setPixelRatio(pr);
+    this.r.setSize(innerWidth, innerHeight, false);
+  }
+  // Compile every shader the game can show up front (players, takeover glow, practice balls...) so nothing
+  // stalls the first time it appears mid-game
+  precompile(cam) {
+    const tmp = [];
+    for (const m of this.models) { m.setTakeover('#ffffff', 0.016, 0); if (m.toAura) { m.toAura.visible = true; tmp.push(m.toAura); } }
+    try { this.r.compile(this.scene, cam || this.camera); } catch (e) { /* ignore */ }
+    for (const a of tmp) a.visible = false;
+    for (const m of this.models) m.toGlow = 0;
   }
 
   addPlayers(game) {

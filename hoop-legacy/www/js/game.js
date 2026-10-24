@@ -196,9 +196,64 @@ export class Game {
       this.emit('benchIntro', { clock: this.clock, score: [...this.score] });
       return;
     }
-    this.phase = 'dead';
+    this.setupTip();
+  }
+  // ---------- jump ball ----------
+  // Centers face off in the center circle, everyone else lines up around it; the ref tosses it up, the centers
+  // jump and the winner taps it to their point guard. Height, vertical and timing win it (tap SHOOT to jump if
+  // you're the one jumping).
+  setupTip() {
+    this.inb = null; this.pending = null;
+    const ring = [[-5.5, 6.5], [-5.5, -6.5], [-11, 2], [-11, -9]];
+    for (const t of [0, 1]) {
+      const d = this.dir(t), mates = this.teamPlayers(t);
+      const c = mates.find(p => p.slot === 4) || mates[mates.length - 1];
+      mates.filter(p => p !== c).forEach((p, i) => { const [u, v] = ring[i]; p.pos = { x: d * u, z: v * (t ? -1 : 1) }; p.facing = angTo(-p.pos.x, -p.pos.z); });
+      c.pos = { x: -d * 1.3, z: 0 }; c.facing = angTo(d, 0);
+      this.tipC = this.tipC || {}; this.tipC[t] = c;
+    }
+    for (const p of this.players) {
+      p.vel = { x: 0, z: 0 }; p.y = 0; p.vy = 0; p.action = null; p.stun = 0; p.hasBall = false; p.holding = false; p.post = false;
+      p.push.x = p.push.z = 0; p.aiTarget = null;
+    }
+    const b = this.ball;
+    b.holder = null; b.state = 'tip'; b.pos = { x: 0, y: 5.5, z: -0.9 }; b.vel = { x: 0, y: 0, z: 0 };
+    this.tip = { t: 0, jumped: {}, userJumpAt: null };
+    this.phase = 'tip';
     this.emit('tipoff', {});
-    this.pending = { t: 1.2, fn: () => { this.phase = 'live'; } };
+  }
+  updateTip(dt, input) {
+    const T = this.tip, b = this.ball;
+    T.t += dt;
+    const toss = 0.8; // ref holds it, then tosses
+    if (T.t > toss && !T.won) {
+      const k = T.t - toss;
+      b.pos = { x: 0, y: 5.5 + 21 * k - 0.5 * G_BALL * k * k, z: -0.9 + Math.min(0.9, k * 1.5) };
+    }
+    for (const t of [0, 1]) {
+      const c = this.tipC[t];
+      const auto = toss + 0.42 + (c.isUser ? 0 : (Math.random() - 0.5) * 0.002 + (99 - c.r.vert) * 0.002);
+      const press = c.isUser && input && input.shootPressed && T.t > toss;
+      if (!T.jumped[t] && ((c.isUser && (press || T.t > toss + 0.75)) || (!c.isUser && T.t > auto))) {
+        T.jumped[t] = T.t; this.setAction(c, 'rebound', 0.9); c.vy = 11 + c.r.vert * 0.06;
+      }
+      if (T.jumped[t]) { c.vy -= G_PLAYER * dt; c.y = Math.max(0, c.y + c.vy * dt); }
+    }
+    // The ball comes back down into the jumpers' reach: whoever is higher (with a timing / athleticism roll) taps it
+    const apexT = toss + 21 / G_BALL;
+    if (!T.won && T.t > apexT + 0.08) {
+      const reach = t => { const c = this.tipC[t]; return reachOf(c.heightFt) + c.y + c.r.vert * 0.01 + Math.random() * 0.9; };
+      const r0 = reach(0), r1 = reach(1);
+      if (Math.max(r0, r1) >= b.pos.y - 0.6 || T.t > apexT + 0.45) {
+        const w = r0 >= r1 ? 0 : 1;
+        T.won = true;
+        const pg = this.handlerFor(w);
+        this.offense = w;
+        this.startPass(null, pg, { from: { ...b.pos }, team: w, noIntercept: true });
+        this.emit('tipWon', { team: w, by: this.tipC[w] });
+      }
+    }
+    if (T.won && b.state !== 'pass') { this.tip = null; this.phase = 'live'; this.shotClock = 24; }
   }
   resumeFromBench() {
     this.formation(this.offense);
@@ -340,6 +395,11 @@ export class Game {
     if (this.pending) {
       this.pending.t -= dt;
       if (this.pending.t <= 0) { const f = this.pending.fn; this.pending = null; f(); }
+    }
+    if (this.phase === 'tip') {
+      this.updateTip(dt, input);
+      if (this.tip && this.tip.won) { this.updatePlayers(dt, { move: { x: 0, z: 0 } }); this.updateBall(dt); }
+      return;
     }
     if (this.inb) this.updateInbound(dt);
     if (this.phase === 'ft') this.updateFT(dt, input);
@@ -2158,10 +2218,21 @@ export class Game {
         const pw = (this.style.power && handler.isUser) ? 20 : 0;
         const ratio = clamp(0.5 + (def.r.strength - handler.r.strength - pw) / 120, 0.25, 0.8);
         if (handler === a) { wa = ratio; wc = 1 - ratio; } else { wc = ratio; wa = 1 - ratio; }
-        // Body-up: bleed handler speed into the defender
+        // Body-up: bleed handler speed into the defender (a much stronger handler barely slows down)
         const hv = handler.vel, sgn = handler === a ? 1 : -1;
         const into = (hv.x * nx + hv.z * nz) * sgn;
-        if (into > 0) { hv.x -= nx * sgn * into * 0.6; hv.z -= nz * sgn * into * 0.6; }
+        const edge = handler.r.strength + pw * 0.75 - def.r.strength; // strength advantage
+        if (into > 0) { const bleed = clamp(0.6 - edge / 60, 0.1, 0.75); hv.x -= nx * sgn * into * bleed; hv.z -= nz * sgn * into * bleed; }
+        // Stronger handler dribbling into his man: bumps him off and keeps going
+        if (this.phase === 'live' && edge >= 10 && into > 4 && def.y === 0 && !def.action && !handler.action && this.time - (handler.contactT || -9) > 0.7) {
+          handler.contactT = this.time;
+          this.knock(def, handler.pos, 4 + edge / 6, 'bump', 0.45 + Math.min(0.35, edge / 80));
+          def.stun = Math.max(def.stun, 0.35 + edge / 100);
+          this.emit('contact', { p: handler, power: 3 + edge / 10 });
+          if (handler.isUser) this.bc(handler, 'bully', 0.5);
+        }
+        // The stronger player holds his line and the bodies separate by moving the weaker one
+        if (edge >= 10) { const r2 = clamp(0.5 - edge / 70, 0.1, 0.5); if (handler === a) { wa = r2; wc = 1 - r2; } else { wc = r2; wa = 1 - r2; } }
         // Hard drive into a set defender: contact, sometimes a charge
         if (this.phase === 'live' && into > 12 && len(def.vel.x, def.vel.z) < 5 && def.y === 0 && !def.action && !handler.post && handler.action !== 'dunk'
           && this.time - (handler.contactT || -9) > 0.9) {
@@ -2169,6 +2240,17 @@ export class Game {
           if (chance(0.09 + (def.r.intD - 60) / 400 + this.bt(def, 'brickWall') * 0.02)) { this.bc(def, 'brickWall', 2); this.charge(handler, def); return; }
           this.knock(def, handler.pos, 5, 'bump', 0.4);
           this.knock(handler, def.pos, 4, 'bump', 0.3);
+        }
+      }
+      // Off the ball: a stronger offensive player moving through his defender knocks him off his spot
+      if (!handler && a.team !== c.team && this.phase === 'live') {
+        const off = a.team === this.offense ? a : c, dfn = off === a ? c : a, sg = off === a ? 1 : -1;
+        const into2 = (off.vel.x * nx + off.vel.z * nz) * sg, edge2 = off.r.strength - dfn.r.strength;
+        if (edge2 >= 12 && into2 > 6 && !dfn.action && dfn.y === 0 && this.time - (off.contactT || -9) > 1.0) {
+          off.contactT = this.time;
+          this.knock(dfn, off.pos, 3 + edge2 / 8, 'bump', 0.4);
+          dfn.stun = Math.max(dfn.stun, 0.3);
+          wa = off === a ? 0.15 : 0.85; wc = 1 - wa;
         }
       }
       a.pos.x -= nx * o * wa; a.pos.z -= nz * o * wa;

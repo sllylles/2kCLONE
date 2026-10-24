@@ -445,7 +445,7 @@ function renderHistory() {
   $('listTitle').textContent = 'CAREER';
   const avg = k => (t[k] / gp).toFixed(1);
   const goals = C.lifeGoals(c);
-  const goalsHTML = `<div class="up-group">LIFETIME GOALS</div><p class="hint">Stats are scaled to full NBA games (12-minute quarters, 82-game seasons). Career totals count NBA games.</p>
+  const goalsHTML = `<div class="up-group">LIFETIME GOALS</div><p class="hint">${c.nba ? '' : 'Unlocks when you reach the NBA. '}Only NBA games count, scaled to full NBA games (12-minute quarters, 82-game seasons).</p>
     <div class="goals">${goals.map(gl => {
       const nx = gl.next, prev = gl.done ? gl.tiers[gl.done - 1][0] : 0;
       const pct = nx ? Math.min(100, Math.max(0, (gl.value - (gl.kind === 'game' ? 0 : prev)) / ((nx[0] - (gl.kind === 'game' ? 0 : prev)) || 1) * 100)) : 100;
@@ -731,6 +731,7 @@ function startMatch(info) {
   renderer.resize();
   renderer.buildArena(info.homeTeam);
   renderer.addPlayers(game);
+  renderer.precompile();
   const [A, B] = info.teams;
   const sbA = $('sbA'), sbB = $('sbB');
   sbA.style.background = A.c1; sbA.style.color = A.c2 === '#ffffff' || A.c2 === '#e5e5e5' ? '#fff' : A.c2;
@@ -868,6 +869,7 @@ function onGameEvent(type, d) {
     case 'contact': sfx.thud(); if (d.power >= 4 && (d.p.isUser || d.p === game.matchup(game.user))) renderer.shake = Math.max(renderer.shake, 0.12); break;
     case 'poster': renderer.hype = 1.6; markPlay('poster', d.p, d.p.isUser || d.def.isUser ? 10 : 7, 'POSTERIZED!', true); toast(d.p.isUser ? 'POSTERIZED!' : d.def.isUser ? 'YOU GOT POSTERIZED' : 'POSTERIZED!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.6; if (d.p.isUser) vib(90); break;
     case 'stepover': renderer.hype = Math.max(renderer.hype || 0, 1.3); sfx.ooh(); toast(d.p.isUser ? 'STEPPED OVER HIM!' : 'STEPPED OVER!', d.p.team === game.userTeam ? '#ff5a1f' : '#e5484d'); if (d.p.isUser) markPlay('poster', d.p, 9, 'STEP OVER', false); break;
+    case 'tipWon': callout(d.team === game.userTeam ? (d.by.isUser ? 'YOU WON THE TIP!' : 'WON THE TIP') : 'LOST THE TIP', d.team === game.userTeam ? '#3ddc84' : '#e5484d'); break;
     case 'takeover': {
       const nm = `#${d.p.num} ${d.p.name.split(' ').pop().toUpperCase()}`;
       if (d.p.isUser) {
@@ -1023,6 +1025,7 @@ function loop(now) {
     for (let i = 0; i < steps; i++) g.update(dt / steps, i === 0 ? input : { ...input, shootPressed: false, passPressed: false, gesture: null, shootReleased: false });
   }
   renderer.render(g, dt, now / 1000);
+  if (!paused && !replay) renderer.adapt(dt);
   updateHUD(dt);
   if (!paused && recorder) {
     recorder.capture(dt);

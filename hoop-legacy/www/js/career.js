@@ -222,11 +222,13 @@ export function lifeGoals(c) {
 }
 // Record a game and pay out any goal tiers just reached. Returns [{label, n, who, ap, vc}]
 function updateLifeGoals(c, s, scale) {
-  c.life = c.life || { best: {}, career: {}, done: {} };
+  if (!c.life || c.life.v !== 2) c.life = { v: 2, best: {}, career: {}, done: {} }; // (pre-NBA records from older builds are wiped)
   const L = c.life, perGame = 12 / Math.max(1, scale.q || 3), perSeason = 82 / Math.max(1, scale.season || 29);
+  // Lifetime goals are an NBA thing: high school, college and G League games don't count
+  if (!(c.nba && (c.phase === 'nba' || c.phase === 'playoffs'))) return [];
   for (const k of ['pts', 'reb', 'ast', 'stl', 'blk', 'tpm']) {
     L.best[k] = Math.max(L.best[k] || 0, (s[k] || 0) * perGame);
-    if (c.nba && (c.phase === 'nba' || c.phase === 'playoffs')) L.career[k] = (L.career[k] || 0) + (s[k] || 0) * perGame * perSeason;
+    L.career[k] = (L.career[k] || 0) + (s[k] || 0) * perGame * perSeason;
   }
   const out = [];
   for (const g of LIFE_GOALS) {

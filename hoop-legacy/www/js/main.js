@@ -334,13 +334,13 @@ function renderHub() {
       ? `<div class="ng-meter"><div class="lbl"><span>RECORD</span><span>${n.record[0]}-${n.record[1]}</span></div><div class="track"><i style="width:${(n.record[0] / Math.max(1, n.schedule.length)) * 100}%"></i></div></div>`
       : `<div class="ng-meter"><div class="lbl"><span>COACH TRUST → STARTING 5</span><span>${n.trust}% · ${n.record[0]}-${n.record[1]}</span></div><div class="track"><i style="width:${n.trust}%"></i></div></div>`;
   }
-  $('hubNext').innerHTML = `<div class="ng-label">${esc(info.label)}</div>
+  $('hubNext').innerHTML = `<div class="ng-scroll"><div class="ng-label">${esc(info.label)}</div>
     <div class="ng-match"><div class="ng-team">${teamLogo(info.myTeam)}<b>${esc(info.myTeam.name)}</b><small>${info.myOvr} OVR</small></div>
     <div class="ng-vs">VS</div>
     <div class="ng-team">${teamLogo(info.opp)}<b>${esc(info.opp.name)}</b><small>${info.oppOvr} OVR</small></div></div>
     ${info.tag ? `<div class="ng-tag">${esc(info.tag)}</div>` : ''}
     ${meter}
-    ${tasksHTML(C.gameTasks(c, settings))}
+    ${tasksHTML(C.gameTasks(c, settings))}</div>
     <div class="ng-btns"><button class="btn ghost" id="btnSim">SIM GAME</button><button class="btn primary" id="btnPlay">PLAY GAME</button></div>`;
   C.saveCareer(c); // keep this game's tasks
   $('btnPlay').onclick = () => { sfx.click(); startMatch(info); };

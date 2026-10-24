@@ -397,3 +397,7 @@ tr.cut td { border-bottom: 2px dashed rgba(255,90,31,.6); }
 .anim .req span { color: #ff8a8d; } .anim .req span.ok { color: var(--green); }
 .anim em.new { font-style: normal; font-size: 10px; background: var(--green); color: #111; padding: 1px 6px; border-radius: 6px; vertical-align: middle; }
 .anim .btn.eq { background: transparent; color: var(--gold); opacity: 1; }
+
+/* Hub next-game card: content scrolls, PLAY / SIM always visible at the bottom */
+.ng-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.next-game .tasks .task { padding: 4px 8px; margin-top: 3px; }

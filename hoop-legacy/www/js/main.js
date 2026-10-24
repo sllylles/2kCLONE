@@ -684,6 +684,7 @@ function onGameEvent(type, d) {
     case 'screenSet': if (d.for.isUser) callout('SCREEN SET, USE IT!', '#ffd23f'); break;
     case 'contact': sfx.thud(); if (d.power >= 4 && (d.p.isUser || d.p === game.matchup(game.user))) renderer.shake = Math.max(renderer.shake, 0.12); break;
     case 'poster': renderer.hype = 1.6; markPlay('poster', d.p, d.p.isUser || d.def.isUser ? 10 : 7, 'POSTERIZED!', true); toast(d.p.isUser ? 'POSTERIZED!' : d.def.isUser ? 'YOU GOT POSTERIZED' : 'POSTERIZED!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.6; if (d.p.isUser) vib(90); break;
+    case 'stepover': renderer.hype = Math.max(renderer.hype || 0, 1.3); sfx.ooh(); toast(d.p.isUser ? 'STEPPED OVER HIM!' : 'STEPPED OVER!', d.p.team === game.userTeam ? '#ff5a1f' : '#e5484d'); if (d.p.isUser) markPlay('poster', d.p, 9, 'STEP OVER', false); break;
     case 'takeover': {
       const nm = `#${d.p.num} ${d.p.name.split(' ').pop().toUpperCase()}`;
       if (d.p.isUser) {

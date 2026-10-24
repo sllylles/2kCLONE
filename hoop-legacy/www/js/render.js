@@ -411,12 +411,14 @@ export class Renderer {
       } else if (mode === 'vmove') {
         // Crossover / between the legs / behind the back: V-shaped bounce from one hand to the other
         const k = Math.min(1, p.actionT / p.actionDur);
-        const from = p.dribbleHand === 'R' ? m.handWorldL : m.handWorld;
         const off = p.action === 'cross' ? 1.0 : p.action === 'btl' ? 0.1 : -0.85;
         const rx = p.pos.x + fx * off, rz = p.pos.z + fz * off;
+        // Start from wherever the ball actually is (mid-dribble or mid-move when chaining), no snapping
+        if (m.vmKey !== p.lastMove || !m.vmFrom) { m.vmKey = p.lastMove; m.vmFrom = bp.clone(); }
+        const from = m.vmFrom;
         if (k < 0.5) {
           const t = k / 0.5;
-          bp.set(lerp(from.x, rx, t), lerp(from.y - 0.3, 0.42, t * t), lerp(from.z, rz, t));
+          bp.set(lerp(from.x, rx, t), lerp(from.y, 0.42, t * t), lerp(from.z, rz, t));
         } else {
           const t = (k - 0.5) / 0.5;
           bp.set(lerp(rx, hand.x + fx * 0.4, t), lerp(0.42, hand.y - 0.3, Math.sqrt(t)), lerp(rz, hand.z + fz * 0.4, t));

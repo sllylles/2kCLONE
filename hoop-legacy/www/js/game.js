@@ -11,6 +11,7 @@ const G_PLAYER = 38;
 const rand = (a, b) => a + Math.random() * (b - a);
 const chance = p => Math.random() < p;
 const len = (x, z) => Math.hypot(x, z);
+const lerp = (a, b, t) => a + (b - a) * t;
 const angTo = (dx, dz) => Math.atan2(dx, dz);
 function angLerp(a, b, t) {
   let d = b - a;
@@ -280,6 +281,9 @@ export class Game {
     this.ball.state = 'dead';
     this.ball.holder = null;
     this.changePossession(team);
+    // After a score your player heads to the other end on their own (until you touch the stick):
+    // getting into the offense, or getting back and picking up their man
+    if (this.user) { this.user.autoRun = true; this.user.autoRunT = 0; }
     const d = this.dir(team);
     if (!spot) spot = { x: -d * 48.6, z: (chance(0.5) ? 1 : -1) * 3.5 };
     const recv = this.handlerFor(team);
@@ -433,10 +437,19 @@ export class Game {
     if (u.hasBall && this.ball.state === 'held') {
       if (input.postPressed && !busy) {
         if (u.post) u.post = false;
-        else if (this.distHoop(u) < 24) { u.post = true; u.holding = false; this.emit('call', { text: 'POSTING UP' }); }
+        else if (this.distHoop(u) < 17) { u.post = true; u.holding = false; this.emit('call', { text: 'POSTING UP' }); }
         else this.emit('call', { text: 'TOO FAR TO POST UP' });
       }
-      if (input.gesture && !busy && u.y === 0) this.dribbleMove(u, input.gesture);
+      // Dribble combos: a swipe during a move is buffered and chains out of it near the end of the move
+      if (input.gesture && u.y === 0) {
+        if (!busy) this.dribbleMove(u, input.gesture);
+        else if (this.isMove(u.action)) u.queuedMove = { g: input.gesture, t: this.time };
+      }
+      if (u.queuedMove) {
+        const q = u.queuedMove;
+        if (this.time - q.t > 0.55 || !u.hasBall) u.queuedMove = null;
+        else if (!u.action || (this.isMove(u.action) && u.actionT >= u.actionDur * 0.6)) { u.queuedMove = null; this.dribbleMove(u, q.g, true); }
+      }
       // Remember a SHOOT press for a moment so it isn't lost while a move or bump finishes
       if (input.shootPressed) u.shootBuf = this.time + 0.4;
       if (u.shootBuf > this.time && (input.shootHeld || input.shootPressed) && (!busy || this.isMove(u.action)) && u.y === 0) { u.shootBuf = 0; this.userShoot(u, input); }
@@ -524,6 +537,7 @@ export class Game {
 
   userShoot(u, input) {
     const dh = this.distHoop(u);
+    if (u.post && dh > 17) u.post = false; // walked out of the post: a normal jumper
     if (u.post) {
       // Default: turnaround fadeaway. Hold the stick toward the rim for a hook.
       const h = this.hoopOf(u.team), hx = h.x - u.pos.x, hz = h.z - u.pos.z, hl = len(hx, hz) || 1;
@@ -649,8 +663,9 @@ export class Game {
   }
 
   // ---------- dribble moves ----------
-  dribbleMove(p, gesture) {
-    if (this.time - (p.lastMove || -9) < this.style.cooldown) return;
+  dribbleMove(p, gesture, chained = false) {
+    if (!chained && this.time - (p.lastMove || -9) < this.style.cooldown) return;
+    p.moveVin = { x: p.vel.x, z: p.vel.z }; // the next move flows out of the last one's momentum
     if (p.post) { this.postMove(p, gesture); return; }
     const h = this.hoopOf(p.team);
     let hx = h.x - p.pos.x, hz = h.z - p.pos.z; const hl = len(hx, hz) || 1; hx /= hl; hz /= hl;
@@ -707,7 +722,7 @@ export class Game {
         if (chance(s)) {
           const ankle = chance(s * 0.2 * this.style.ankle * (1 + this.bt(p, 'ankleBreaker') * 0.25) * (this.toIs(p, 'playmaking') ? 1.7 : 1));
           if (ankle) {
-            this.setAction(def, 'fall', 1.7); def.stun = 1.7;
+            this.setAction(def, 'fall', 1.7); def.stun = 1.7; def.fallVar = chance(0.5) ? 1 : 0;
             if (p.isUser) this.addGrade(1.5, 'Ankle breaker');
             this.emit('ankle', { p, def }); this.bc(p, 'ankleBreaker', 3);
             this.toGain(p, 0.15); this.toGain(def, -0.06);
@@ -846,7 +861,7 @@ export class Game {
 
   // How hard the shot is right now (1 = open and set, smaller = contested / deep / off the dribble).
   shotDifficulty(p) {
-    const c = this.contestOf(p).c * (p.shotStyle === 'fade' ? 0.6 : p.shotStyle === 'hook' ? 0.65 : p.shotStyle === 'drift' ? 0.85 : 1);
+    const c = this.contestOf(p).c * (p.shotStyle === 'fade' ? lerp(0.6, 1, clamp((this.distHoop(p) - 14) / 8, 0, 1)) : p.shotStyle === 'hook' ? 0.65 : p.shotStyle === 'drift' ? 0.85 : 1);
     let f = 1 - 0.7 * c;
     const dh = this.distHoop(p);
     if (dh > 26) f *= Math.max(0.25, 1 - (dh - 26) * 0.12);
@@ -874,7 +889,7 @@ export class Game {
     if (p.action === 'layup') w *= 1.3;
     if (!p.ft) w *= this.shotDifficulty(p) * this.greenRange(p);
     if (p.catchT && this.time - p.catchT < 1.6) w *= 1 + this.bt(p, 'catchShoot') * 0.08;
-    if (p.shotStyle === 'fade' || p.shotStyle === 'hook') w *= 1 + this.bt(p, 'fadeAce') * 0.08;
+    if ((p.shotStyle === 'fade' || p.shotStyle === 'hook') && this.distHoop(p) < 20) w *= 1 + this.bt(p, 'fadeAce') * 0.08;
     w *= 1 + this.bt(p, 'greenMachine') * 0.06 * Math.min(this.greenStreak, 3);
     if (p.isUser) w *= 1 - this.heat * 0.3;
     if (this.toIs(p, 'shooting')) w *= 1.6;
@@ -924,7 +939,8 @@ export class Game {
   // Dunk jump: rise until the hand clears the rim, higher for bouncier players and flashy dunks
   dunkApex(p, flashy) {
     const need = RIM_Y + 1.0 - reachOf(p.heightFt);
-    return Math.max(3.0, need) + clamp((p.r.vert - 55) / 40, 0, 1) * 0.9 + (flashy ? 0.6 : 0);
+    const over = p.dunkStyle === 'contact' && p.contactVar === 1 ? 1.1 : 0; // jumping over the defender
+    return Math.max(3.0, need) + clamp((p.r.vert - 55) / 40, 0, 1) * 0.9 + (flashy ? 0.6 : 0) + over;
   }
 
   // Better dunkers unlock more dunk styles
@@ -1003,7 +1019,8 @@ export class Game {
     const cd = type === 'dunk' && p.dunkStyle === 'contact' ? p.contactDef : null;
     if (cd && !cd.isUser && cd.stun <= 0) {
       cd.meet = { x: h.x + dx / ll * 3.2, z: h.z + dz / ll * 3.2, until: this.time + p.releaseAt };
-      cd.blockQueued = Math.max(0.05, p.releaseAt - 0.32);
+      if (p.contactVar === 1) { cd.duckUntil = this.time + p.releaseAt + 0.25; cd.blockQueued = undefined; }
+      else cd.blockQueued = Math.max(0.05, p.releaseAt - 0.32);
     }
   }
 
@@ -1043,7 +1060,7 @@ export class Game {
     let prob;
     let c2 = c;
     if (p.shotStyle === 'hook') c2 = c * 0.65;
-    if (p.shotStyle === 'fade') c2 = c * 0.6;
+    if (p.shotStyle === 'fade') c2 = c * lerp(0.6, 1, clamp((dh - 14) / 8, 0, 1));
     if (p.shotStyle === 'drift') c2 = c * 0.85;
     if (this.toIs(p, 'shooting')) c2 *= 0.6;
     if (kind === 'jumper') c2 *= 1 - this.bt(p, 'deadeye') * 0.1;
@@ -1121,8 +1138,11 @@ export class Game {
       if (chance(fp)) foul = contester;
     }
     if (poster) {
-      contester.fallVar = Math.floor(Math.random() * 3);
-      this.knock(contester, p.pos, 16, 'posterfall', 1.9, true);
+      contester.fallVar = p.dunkStyle === 'contact' && p.contactVar === 1 ? 0 : Math.floor(Math.random() * 3);
+      contester.duckUntil = 0;
+      this.knock(contester, p.pos, 13, 'posterfall', 2.5, true);
+      // Sometimes the dunker steps over the guy he just dunked on
+      p.stepOver = chance(0.4) ? contester : null;
       this.emit('poster', { p, def: contester }); this.bc(p, 'posterizer', 2);
       if (p.isUser) this.addGrade(2, 'Posterized');
     } else if (foul) {
@@ -1659,19 +1679,36 @@ export class Game {
           }
           const was = p.action;
           p.action = null;
+          if (was === 'land' && p.stepOver) {
+            const v = p.stepOver; p.stepOver = null;
+            const dx = v.pos.x - p.pos.x, dz = v.pos.z - p.pos.z, d = len(dx, dz);
+            if (v.action === 'posterfall' && v.fallVar !== 1 && v.actionT < v.actionDur * 0.6 && d < 7) {
+              // Walk right over him: past his body and a couple of steps beyond, looking down at him
+              const go = d + 2.6;
+              this.setAction(p, 'stepover', 1.15);
+              p.moveVel = { x: dx / (d || 1) * go / 1.15, z: dz / (d || 1) * go / 1.15 };
+              p.facing = Math.atan2(dx, dz); p.stepVictim = v;
+              this.emit('stepover', { p, def: v });
+            }
+          }
           if (was === 'shoot' && !p.ft && p.isUser && !p.hasBall) this.setAction(p, 'shotfollow', 0.35);
         }
       }
       // Desired velocity
       let desX = 0, desZ = 0, sprint = false;
       const ms = this.maxSpeed(p);
-      const lockedAct = p.action && ['shoot', 'layup', 'dunk', 'hang', 'fall', 'posterfall', 'block', 'rebound', 'steal', 'pass', 'land', 'screen'].includes(p.action);
+      const lockedAct = p.action && ['shoot', 'layup', 'dunk', 'hang', 'fall', 'posterfall', 'block', 'rebound', 'steal', 'pass', 'land', 'screen', 'stepover'].includes(p.action);
       if (p.isUser) {
         const m = input.move;
         const ml = len(m.x, m.z);
         sprint = input.sprint && p.energy > 3;
         let useAI = false;
+        if (p.autoRun) {
+          p.autoRunT += dt;
+          if (ml > 0.15 || p.hasBall || p.autoRunT > 12 || this.phase === 'ft') p.autoRun = false;
+        }
         if (this.phase === 'ft') useAI = false;
+        else if (p.autoRun && !(this.inb && this.inb.receiver === p)) { useAI = true; }
         else if (p.lobPt && b.state === 'pass' && b.pass.to === p) { useAI = true; }
         else if (this.inb && this.inb.receiver === p && ml < 0.15) { useAI = true; }
         else if (p.screen && ml < 0.6) { useAI = true; }
@@ -1684,6 +1721,7 @@ export class Game {
             : this.inb && this.inb.receiver === p ? { x: this.inb.recvSpot.x, z: this.inb.recvSpot.z, sprint: true } : null;
           if (!t && p.screen) t = this.updateScreen(p, dt) || { x: p.pos.x, z: p.pos.z };
           if (!t && p.boxing) t = this.boxOutSpot(p);
+          if (!t && p.autoRun && this.offense === p.team) t = this.offSpot(p, dt);
           if (!t) t = this.defSpot(p);
           const dx = t.x - p.pos.x, dz = t.z - p.pos.z, d = len(dx, dz);
           const s = Math.min(ms * (t.sprint ? 1.3 : 1), d * 4);
@@ -1720,16 +1758,22 @@ export class Game {
         p.faceTarget = t.face || null;
       }
       if (p.stun > 0) { desX *= this.isDown(p) ? 0 : 0.25; desZ *= this.isDown(p) ? 0 : 0.25; }
-      if (p.post && (!p.hasBall || this.distHoop(p) > 26)) p.post = false;
+      if (p.post && (!p.hasBall || this.distHoop(p) > 19)) { p.post = false; if (p.isUser) this.emit('call', { text: 'OUT OF THE POST' }); }
       if (p.post && p.hasBall && !p.action) { const bd = this.backDown(p, desX, desZ, dt); desX = bd.x; desZ = bd.z; }
       if (p.inbounding) { desX = desZ = 0; }
 
       if (this.isMove(p.action) && p.moveVel) {
-        const k = p.actionT / p.actionDur;
-        let f = Math.sin(Math.min(1, k) * Math.PI);
-        if (p.action === 'hesi') f = k < 0.45 ? 0.1 : 1.6;
-        p.vel.x = p.moveVel.x * f + desX * 0.25;
-        p.vel.z = p.moveVel.z * f + desZ * 0.25;
+        // Flow: ease in from the speed you came in with (the last move, or your run), burst, then hand
+        // back to the stick at the end, so chained moves carry through instead of stopping dead.
+        const k = Math.min(1, p.actionT / p.actionDur);
+        const sm = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+        const vin = p.moveVin || { x: 0, z: 0 };
+        let a = sm(0, 0.35, k), mv = p.moveVel;
+        if (p.action === 'hesi') { a = sm(0.35, 0.55, k); mv = k < 0.45 ? { x: mv.x * 0.1, z: mv.z * 0.1 } : { x: mv.x * 1.4, z: mv.z * 1.4 }; }
+        const out = sm(0.62, 1, k);
+        const bx = vin.x + (mv.x - vin.x) * a, bz = vin.z + (mv.z - vin.z) * a;
+        p.vel.x = bx + (desX - bx) * out;
+        p.vel.z = bz + (desZ - bz) * out;
       } else if (lockedAct) {
         // Committed: carry momentum, drift toward finish point
         if ((p.action === 'layup' || p.action === 'dunk') && p.finishPt) {
@@ -1738,6 +1782,7 @@ export class Game {
           const s = Math.min(26, d / k);
           p.vel.x = d > 0.2 ? dx / d * s : 0; p.vel.z = d > 0.2 ? dz / d * s : 0;
         } else if (p.action === 'hang') { p.vel.x = p.vel.z = 0; }
+        else if (p.action === 'stepover' && p.moveVel) { p.vel.x = p.moveVel.x; p.vel.z = p.moveVel.z; }
         else if (p.action === 'shoot' && !p.ft && (p.shotStyle === 'fade' || p.shotVel)) {
           // Moving shots and fades carry their momentum: the gather plants (a pull-up mostly stops, a drift
           // or a fade keeps most of its speed, and a fade pushes back off the defender), then the take-off
@@ -1796,7 +1841,7 @@ export class Game {
         const h = this.hoopOf(p.team); want = angTo(h.x - p.pos.x, h.z - p.pos.z) + (p.moveDir || 1) * 1.3;
       } else if (p.action === 'shoot' || p.action === 'layup' || p.action === 'dunk' || p.action === 'hang') {
         const h = this.hoopOf(p.team); want = angTo(h.x - p.pos.x, h.z - p.pos.z);
-      } else if (this.isDown(p) || p.action === 'bump') {
+      } else if (this.isDown(p) || p.action === 'bump' || p.action === 'stepover') {
         want = null;
       } else if (p.boxing) {
         const h = this.hoopOf(this.offense); want = angTo(h.x - p.pos.x, h.z - p.pos.z);

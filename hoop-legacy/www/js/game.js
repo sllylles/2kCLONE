@@ -1,5 +1,5 @@
 // Basketball match simulation: 5v5 full court, user controls one player (MyCareer style).
-import { DRIBBLE_STYLES, JUMPSHOTS, FLASHY_DUNKS, TAKEOVERS, GOAT_SKILLS, animProfile, takeoverType, clamp, reachOf } from './data.js';
+import { DRIBBLE_STYLES, JUMPSHOTS, FLASHY_DUNKS, TAKEOVERS, GOAT_SKILLS, GOAT_TIERS, animProfile, takeoverType, clamp, reachOf } from './data.js';
 
 export const HOOP_X = 41.75;
 export const RIM_Y = 10;
@@ -159,8 +159,10 @@ export class Game {
     if (p.goatN >= G.need) {
       p.goatN = 0; p.goatOn = true; p.goatUntil = this.time + this.qLen * 5 / 12;
       p.goatSaved = {};
-      for (const k of G.attrs) { p.goatSaved[k] = p.r[k]; p.r[k] = 99; }
-      this.emit('goat', { p, info: G });
+      const tier = GOAT_TIERS[this.opts.goatTier || 0];
+      for (const k of G.attrs) { p.goatSaved[k] = p.r[k]; p.r[k] = Math.min(99, tier.boost >= 99 ? 99 : p.r[k] + tier.boost); }
+      this.goatActs = (this.goatActs || 0) + 1;
+      this.emit('goat', { p, info: G, tier });
     } else this.emit('goatProgress', { p, n: p.goatN, need: G.need });
   }
   updateTakeovers(dt) {

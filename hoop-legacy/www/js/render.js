@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { HOOP_X, RIM_Y, COURT_HALF_L, COURT_HALF_W } from './game.js';
 import { PlayerModel } from './player.js';
-import { ONE_HAND_DUNKS, TAKEOVERS } from './data.js';
+import { ONE_HAND_DUNKS, TAKEOVERS, GOAT_SKILLS } from './data.js';
 export { PlayerModel };
 
 const PX = 20; // canvas pixels per foot
@@ -385,6 +385,8 @@ export class Renderer {
   precompile(cam) {
     const tmp = [];
     for (const m of this.models) { m.setTakeover('#ffffff', 0.016, 0); if (m.toAura) { m.toAura.visible = true; tmp.push(m.toAura); } }
+    const um = this.models.find(m => m.ring);
+    if (um) { um.setGoat('#ffffff', 0.016, 0); tmp.push(um.goatFx); um.goatGlow = 0; }
     try { this.r.compile(this.scene, cam || this.camera); } catch (e) { /* ignore */ }
     for (const a of tmp) a.visible = false;
     for (const m of this.models) m.toGlow = 0;
@@ -436,6 +438,7 @@ export class Renderer {
       const mode = m.update(p, game, dt, time);
       if (p.hasBall && mode) ballVis = { m, p, mode };
       m.setTakeover(p.toOn && !p.benched ? TAKEOVERS[p.toType].color : null, dt, time);
+      if (p.isUser) m.setGoat(p.goatOn && !p.benched && game.opts.goat ? GOAT_SKILLS[game.opts.goat].color : null, dt, time);
       // The building rocks while a home player is taking over
       if (p.toOn && !p.benched && p.team === game.homeIdx) this.hype = Math.max(this.hype || 0, 0.5);
     }

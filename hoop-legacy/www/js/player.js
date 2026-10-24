@@ -10,6 +10,7 @@ const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const ease = t => t * t * (3 - 2 * t);
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
+const _white = new THREE.Color('#ffffff');
 const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
 const DEF_ANIM = animProfile({});
 const MOVE_SWITCH = { cross: 1, behind: 1, btl: 1 };
@@ -57,6 +58,15 @@ function auraTex(kind) {
     const r = g.createRadialGradient(64, 64, 0, 64, 64, 64);
     r.addColorStop(0, 'rgba(255,255,255,0.9)'); r.addColorStop(0.45, 'rgba(255,255,255,0.45)'); r.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = r; g.fillRect(0, 0, 128, 128);
+  } else if (kind === 'goatOuter' || kind === 'goatInner') {
+    // Planar texture for RingGeometry: bright dashes around the circle with a soft glow
+    const n = kind === 'goatOuter' ? 12 : 8;
+    g.translate(64, 64);
+    for (let i = 0; i < n; i++) {
+      const a0 = i / n * Math.PI * 2, a1 = a0 + Math.PI * 2 / n * 0.6;
+      g.beginPath(); g.arc(0, 0, 63, a0, a1); g.arc(0, 0, kind === 'goatOuter' ? 46 : 43, a1, a0, true); g.closePath();
+      g.fillStyle = 'rgba(255,255,255,0.95)'; g.shadowColor = '#fff'; g.shadowBlur = 8; g.fill();
+    }
   } else if (kind === 'fade') {
     // Alpha (read from green): solid in the middle, fading out at the feet and over the head
     const lg = g.createLinearGradient(0, 0, 0, 128);
@@ -672,6 +682,29 @@ export class PlayerModel {
     this.toCol.material.map.offset.y = -time * 0.6; // heat rising
     this.toCol.rotation.y = time * 0.4;
     this.toAura.position.y = this.body.position.y - (this.pose.bob || 0);
+  }
+
+  // GOAT skill active: two rings of glowing segments spinning opposite ways under the player, pulsing
+  setGoat(color, dt, time) {
+    const want = color ? 1 : 0;
+    this.goatGlow = (this.goatGlow || 0) + (want - (this.goatGlow || 0)) * (1 - Math.exp(-6 * dt));
+    if (this.goatGlow < 0.01 && !color) { if (this.goatFx) this.goatFx.visible = false; return; }
+    if (!this.goatFx) {
+      const g = new THREE.Group();
+      const mk = (r1, r2, kind) => {
+        const m = new THREE.Mesh(new THREE.RingGeometry(r1, r2, 64), new THREE.MeshBasicMaterial({ map: auraTex(kind), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+        m.rotation.x = -Math.PI / 2; g.add(m); return m;
+      };
+      this.goatOuter = mk(2.15, 2.95, 'goatOuter'); this.goatInner = mk(0.95, 1.4, 'goatInner');
+      this.goatOuter.position.y = 0.07; this.goatInner.position.y = 0.075;
+      this.root.add(g); this.goatFx = g;
+    }
+    if (color) { this.goatOuter.material.color.set(color).lerp(_white, 0.45); this.goatInner.material.color.set(color).lerp(_white, 0.6); }
+    this.goatFx.visible = true;
+    const pulse = 1 + Math.sin(time * 7) * 0.06;
+    this.goatOuter.rotation.z = time * 1.6; this.goatInner.rotation.z = -time * 2.4;
+    this.goatOuter.scale.setScalar(pulse); this.goatInner.scale.setScalar(2 - pulse);
+    this.goatOuter.material.opacity = this.goatGlow; this.goatInner.material.opacity = this.goatGlow;
   }
 
   defaultPose() {

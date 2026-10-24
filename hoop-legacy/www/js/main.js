@@ -2,7 +2,7 @@
 import { ATTRS, POSITIONS, PLAYSTYLES, DRIBBLE_STYLES, JUMPSHOTS, SKIN_TONES, HAIR, TEAMS, POS_ORDER,
   buildRatings, overall, gradeLetter, gradeColor, upgradeCost, HEIGHT_RANGES, BUILDS, heightIn, fmtHeight,
   BADGES, BADGE_TIERS, BADGE_COLORS, badgeTier, TAKEOVERS, takeoverType, NBA_COMPS, STYLE_ADJ, CAP_FLOOR, CAP_BUDGET,
-  ANIMS, ANIM_CATS, animFor, animAllowed, GOAT_SKILLS } from './data.js';
+  ANIMS, ANIM_CATS, animFor, animAllowed, GOAT_SKILLS, GOAT_TIERS, goatTier } from './data.js';
 import * as C from './career.js';
 import { Game } from './game.js';
 import { Renderer } from './render.js';
@@ -430,8 +430,13 @@ function renderBadges() {
   const c = career, prog = c.badges || {};
   $('listTitle').textContent = 'BADGES';
   const P = c.player;
-  let html = `<div class="up-group">GOAT SKILL</div><p class="hint">Pick one. Hit its requirement in a game and it switches on for 5 game minutes, maxing out its attributes. It can fire again after it runs out.</p>
-    <div class="choices">${Object.entries(GOAT_SKILLS).map(([k, gs]) => `<button class="choice ${P.goat === k ? 'sel' : ''}" data-goat="${k}"><b style="color:${gs.color}">${gs.name}</b><small>${gs.req} → ${gs.attrs.map(a => ATTRS.find(x => x.key === a).name).join(', ')} go to 99</small></button>`).join('')}</div>`;
+  let html = `<div class="up-group">GOAT SKILL</div><p class="hint">Pick one. Hit its requirement in a game and it switches on for 5 game minutes, boosting its attributes (Bronze +15, Silver +20, Gold +27, Hall of Fame 99). Every activation counts toward the next tier.</p>
+    <div class="choices">${Object.entries(GOAT_SKILLS).map(([k, gs]) => {
+      const acts = (c.goatProg || {})[k] || 0, t = C.isMaxed() ? GOAT_TIERS.length - 1 : goatTier(acts), T = GOAT_TIERS[t], nx = GOAT_TIERS[t + 1];
+      return `<button class="choice ${P.goat === k ? 'sel' : ''}" data-goat="${k}"><b style="color:${gs.color}">${gs.name}</b> <em style="color:${T.color};font-style:normal;font-size:11px;font-weight:900">${T.name.toUpperCase()}</em>
+        <small>${gs.req} → ${gs.attrs.map(a => ATTRS.find(x => x.key === a).name).join(', ')} ${T.boost >= 99 ? 'go to 99' : '+' + T.boost}</small>
+        <small>${nx ? `${acts}/${nx.need} activations to ${nx.name} (${nx.boost >= 99 ? '99' : '+' + nx.boost})` : 'Max tier'}</small></button>`;
+    }).join('')}</div>`;
   html += '<p style="color:var(--dim);font-size:12px;margin:0 0 6px">Badges level up as you do things in games. Every tier makes the effect stronger: Bronze, Silver, Gold, Hall of Fame.</p>';
   for (const cat of ['Scoring', 'Playmaking', 'Defense']) {
     html += `<div class="up-group">${cat.toUpperCase()}</div><div class="badge-grid">`;
@@ -781,7 +786,7 @@ function startMatch(info) {
   game = new Game({
     teams: info.teams, rosters: info.rosters, userTeam: info.userTeam, userSlot: info.slot,
     qLen: settings.qLen, difficulty: settings.difficulty, benchStart: info.benchStart, boost: info.boost,
-    ...C.animOpts(career), playstyle: P.style, goat: P.goat || null, intensity: info.intensity || 0, chemTakeover: info.chemTakeover || 0, defAssist: settings.defAssist, passBias: info.passBias, badges: info.badges, greenBoost: info.greenBoost,
+    ...C.animOpts(career), playstyle: P.style, goat: P.goat || null, goatTier: C.goatTierOf(career), intensity: info.intensity || 0, chemTakeover: info.chemTakeover || 0, defAssist: settings.defAssist, passBias: info.passBias, badges: info.badges, greenBoost: info.greenBoost,
     onEvent: onGameEvent,
   });
   game.homeIdx = info.teams.indexOf(info.homeTeam);
@@ -946,7 +951,16 @@ function onGameEvent(type, d) {
     case 'poster': renderer.hype = 1.6; markPlay('poster', d.p, d.p.isUser || d.def.isUser ? 10 : 7, 'POSTERIZED!', true); toast(d.p.isUser ? 'POSTERIZED!' : d.def.isUser ? 'YOU GOT POSTERIZED' : 'POSTERIZED!', '#ff5a1f'); sfx.ooh(); renderer.shake = 0.6; if (d.p.isUser) vib(90); break;
     case 'stepover': renderer.hype = Math.max(renderer.hype || 0, 1.3); sfx.ooh(); toast(d.p.isUser ? 'STEPPED OVER HIM!' : 'STEPPED OVER!', d.p.team === game.userTeam ? '#ff5a1f' : '#e5484d'); if (d.p.isUser) markPlay('poster', d.p, 9, 'STEP OVER', false); break;
     case 'tipWon': callout(d.team === game.userTeam ? (d.by.isUser ? 'YOU WON THE TIP!' : 'WON THE TIP') : 'LOST THE TIP', d.team === game.userTeam ? '#3ddc84' : '#e5484d'); break;
-    case 'goat': callout(`${d.info.name.toUpperCase()} ACTIVATED!`, d.info.color); toast('GOAT', d.info.color); sfx.cheer(1); vib(60); renderer.hype = Math.max(renderer.hype || 0, 1.2); break;
+    case 'goat': {
+      // Hard to miss: announcer call, big banner, crowd on its feet, ring under your player (render.js)
+      callout(`${d.info.name.toUpperCase()} ACTIVATED!`, d.info.color);
+      toast(`GOAT · ${d.tier.name.toUpperCase()}`, d.info.color);
+      playVO('goat_' + game.opts.goat);
+      sfx.cheer(1.2); vib([60, 40, 90]); renderer.hype = Math.max(renderer.hype || 0, 1.5); renderer.shake = 0.25;
+      $('scrGame').classList.remove('goat-flash'); void $('scrGame').offsetWidth; $('scrGame').classList.add('goat-flash');
+      $('scrGame').style.setProperty('--goat', d.info.color);
+      break;
+    }
     case 'goatProgress': callout(`GOAT ${d.n}/${d.need}`, '#cfd3df'); break;
     case 'goatEnd': callout('GOAT SKILL OVER', '#9aa3b2'); break;
     case 'scuffle': renderer.hype = Math.max(renderer.hype || 0, 1.5); renderer.shake = 0.3; sfx.ooh(); toast('SCUFFLE!', '#e5484d'); callout('DOUBLE TECHNICAL', '#ff8a8d'); vib(80); break;
@@ -1045,7 +1059,7 @@ function endMatch() {
   stopCrowd();
   const my = game.userTeam;
   const rvp = game.players.find(p => p.isRival);
-  const res = { rivalStats: rvp ? { ...rvp.stats } : null, stats: { ...game.user.stats }, grade: game.grade, myScore: game.score[my], oppScore: game.score[1 - my], simmed: false, badgeCounts: { ...game.badgeCounts } };
+  const res = { goatActs: game.goatActs || 0, rivalStats: rvp ? { ...rvp.stats } : null, stats: { ...game.user.stats }, grade: game.grade, myScore: game.score[my], oppScore: game.score[1 - my], simmed: false, badgeCounts: { ...game.badgeCounts } };
   overlay(null);
   finishMatch(matchInfo, res, game);
 }
@@ -1147,7 +1161,8 @@ function updateHUD(dt) {
   $('huTOFill').style.width = (u.toMeter * 100).toFixed(1) + '%';
   $('huTOFill').style.background = to.color;
   const gs = g.opts.goat && GOAT_SKILLS[g.opts.goat];
-  const gtxt = !gs ? '' : u.goatOn ? `${gs.name.toUpperCase()} · ${Math.ceil(Math.max(0, u.goatUntil - g.time))}s` : `GOAT ${u.goatN || 0}/${gs.need}`;
+  const gtier = GOAT_TIERS[g.opts.goatTier || 0].name.toUpperCase();
+  const gtxt = !gs ? '' : u.goatOn ? `${gs.name.toUpperCase()} (${gtier}) · ${Math.ceil(Math.max(0, u.goatUntil - g.time))}s` : `GOAT ${u.goatN || 0}/${gs.need} · ${gtier}`;
   if (ui.gtxt !== gtxt) { $('huGoat').textContent = gtxt; $('huGoat').style.color = u.goatOn ? gs.color : ''; ui.gtxt = gtxt; }
   const mu = g.matchup(u);
   const mtxt = mu ? `${g.offense === u.team ? 'GUARDED BY' : 'GUARDING'} #${mu.num} ${mu.name.split(' ').pop().toUpperCase()}` : '';

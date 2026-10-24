@@ -1,5 +1,5 @@
 // MyCareer state machine: showcase → draft → (G League) → NBA → playoffs → Finals.
-import { NBA_COMPS, STYLE_ADJ, STYLE_NOUN, CAP_FLOOR, CAP_BUDGET, ANIMS, animFor, animAllowed, TEAMS, SHOWCASE_TEAMS, GLEAGUE_NICKS, POSITIONS, POS_ORDER, PLAYSTYLES, ATTRS, SKIN_TONES, HAIR, BUILDS, HEIGHT_MODS, BADGES, badgeTier, heightIn, HS_TEAMS, COLLEGES,
+import { GOAT_SKILLS, GOAT_TIERS, goatTier, NBA_COMPS, STYLE_ADJ, STYLE_NOUN, CAP_FLOOR, CAP_BUDGET, ANIMS, animFor, animAllowed, TEAMS, SHOWCASE_TEAMS, GLEAGUE_NICKS, POSITIONS, POS_ORDER, PLAYSTYLES, ATTRS, SKIN_TONES, HAIR, BUILDS, HEIGHT_MODS, BADGES, badgeTier, heightIn, HS_TEAMS, COLLEGES,
   buildRatings, overall, randName, clamp, gradeLetter, upgradeCost, attrCap } from './data.js';
 
 const SAVE_KEY = 'hoops.career.v1';
@@ -187,6 +187,7 @@ export function animOpts(c) {
   for (const [cat, opt] of Object.entries(ANIM_CAT_KEYS)) { const a = animFor(c.anims.equipped[cat]); if (a) out[opt] = a.key; }
   return { dribbleStyle: out.dribble, jumpshot: out.jumpshot, dunkPkg: out.dunkPkg, defStance: out.defStance };
 }
+export function goatTierOf(c) { const k = c.player.goat; return k ? (maxed ? GOAT_TIERS.length - 1 : goatTier((c.goatProg || {})[k])) : 0; }
 export function newAnimCount(c) { return c.anims ? c.anims.recent.filter(r => !r.seen).length : 0; }
 
 // ---------- Lifetime goals ----------
@@ -340,7 +341,11 @@ export function addBadgeProgress(c, counts) {
   for (const k in counts) {
     if (!BADGES[k] || !counts[k]) continue;
     const before = badgeTier(k, c.badges[k] || 0);
-    c.badges[k] = Math.round(((c.badges[k] || 0) + counts[k]) * 10) / 10;
+    let v = Math.round(((c.badges[k] || 0) + counts[k]) * 10) / 10;
+    // One tier per badge per game at most: progress stops at the next tier until your next game
+    const next = BADGES[k].need[before];
+    if (next != null && v > next) v = next;
+    c.badges[k] = v;
     const after = badgeTier(k, c.badges[k]);
     if (after > before) ups.push({ key: k, tier: after });
   }
@@ -777,6 +782,14 @@ export function applyResult(c, info, res) {
     if (c.phase === 'playoffs' && c.media >= 2) { c.pendingInterview = 'playoffs'; c.media = 0; }
     else if (big && c.media >= 3) { c.pendingInterview = 'postgame'; c.media = 0; }
     else if (!win && c.media >= 6) { c.pendingInterview = 'slump'; c.media = 0; }
+  }
+  // GOAT skill: every activation counts toward its next tier
+  if (res.goatActs && c.player.goat) {
+    c.goatProg = c.goatProg || {};
+    const k = c.player.goat, before = goatTier(c.goatProg[k]);
+    c.goatProg[k] = (c.goatProg[k] || 0) + res.goatActs;
+    const after = goatTier(c.goatProg[k]);
+    if (after > before) out.notes.push(`${GOAT_SKILLS[k].name} upgraded to ${GOAT_TIERS[after].name}!`);
   }
   out.goals = updateLifeGoals(c, s, res.scale || {});
   if (c.anims) out.newAnims = checkAnimUnlocks(c);

@@ -80,6 +80,15 @@ export const GOAT_SKILLS = {
   rebounding: { name: 'GOAT Rebounder', need: 4, req: 'Grab 4 rebounds', attrs: ['reb', 'strength', 'vert'], color: '#ffd23f' },
 };
 
+// GOAT skill tiers: level up by activating it in games. Bronze +15 to its attributes, up to Hall of Fame = 99.
+export const GOAT_TIERS = [
+  { name: 'Bronze', boost: 15, need: 0, color: '#c27c3e' },
+  { name: 'Silver', boost: 20, need: 5, color: '#c9d1d9' },
+  { name: 'Gold', boost: 27, need: 14, color: '#ffd23f' },
+  { name: 'Hall of Fame', boost: 99, need: 30, color: '#b48cff' },
+];
+export function goatTier(acts) { let t = 0; GOAT_TIERS.forEach((x, i) => { if ((acts || 0) >= x.need) t = i; }); return t; }
+
 // Dunks that need extra hang time (and start the reach for the rim later)
 export const FLASHY_DUNKS = ['windmill', '360', 'btl', 'windmill2', '360wm', 'cradle'];
 // Dunks finished with one hand (the ball rides in the right palm)
@@ -315,21 +324,21 @@ export function fmtHeight(inches) { return `${Math.floor(inches / 12)}'${inches 
 export const BADGE_TIERS = ['Bronze', 'Silver', 'Gold', 'Hall of Fame'];
 export const BADGE_COLORS = ['#c27c3e', '#c9d1d9', '#ffd23f', '#b48cff'];
 export const BADGES = {
-  posterizer:  { cat: 'Scoring', name: 'Posterizer', desc: 'More contact dunks on defenders', earn: 'Dunk (posterizers count triple)', need: [3, 12, 30, 70] },
-  acrobat:     { cat: 'Scoring', name: 'Acrobat', desc: 'Better layups through contact', earn: 'Make layups', need: [4, 15, 35, 80] },
-  catchShoot:  { cat: 'Scoring', name: 'Catch & Shoot', desc: 'Boost on jumpers right after a catch', earn: 'Make catch-and-shoot jumpers', need: [3, 12, 30, 70] },
-  deadeye:     { cat: 'Scoring', name: 'Deadeye', desc: 'Contests hurt your jumper less', earn: 'Make contested jumpers', need: [3, 10, 25, 60] },
-  fadeAce:     { cat: 'Scoring', name: 'Fade Ace', desc: 'Better post fades and hooks', earn: 'Make post fades and hooks', need: [2, 8, 20, 50] },
-  greenMachine:{ cat: 'Scoring', name: 'Green Machine', desc: 'Bigger green window after a green', earn: 'Green releases', need: [4, 15, 35, 80] },
-  bully:       { cat: 'Scoring', name: 'Bully', desc: 'Stronger post backdowns', earn: 'Back defenders down in the post', need: [6, 25, 60, 140] },
-  ankleBreaker:{ cat: 'Playmaking', name: 'Ankle Breaker', desc: 'Dribble moves shake defenders more', earn: 'Beat defenders (ankle breakers count triple)', need: [4, 15, 35, 80] },
-  dimer:       { cat: 'Playmaking', name: 'Dimer', desc: 'Teammates shoot better off your passes', earn: 'Assists', need: [4, 15, 40, 90] },
-  needle:      { cat: 'Playmaking', name: 'Needle Threader', desc: 'Your passes are harder to intercept', earn: 'Complete passes', need: [15, 60, 150, 350] },
-  interceptor: { cat: 'Defense', name: 'Interceptor', desc: 'More steals and picked-off passes', earn: 'Steals', need: [3, 10, 25, 60] },
-  rimProtector:{ cat: 'Defense', name: 'Rim Protector', desc: 'Better shot blocking', earn: 'Blocks', need: [3, 10, 25, 60] },
-  clamps:      { cat: 'Defense', name: 'Clamps', desc: 'Dribble moves fail more against you, tighter contests', earn: 'Force misses', need: [4, 15, 35, 80] },
-  rebound:     { cat: 'Defense', name: 'Rebound Chaser', desc: 'Win more rebounds', earn: 'Rebounds', need: [6, 25, 60, 140] },
-  brickWall:   { cat: 'Defense', name: 'Brick Wall', desc: 'Screens and charges hit harder', earn: 'Screens and charges taken', need: [3, 10, 25, 60] },
+  posterizer:  { cat: 'Scoring', name: 'Posterizer', desc: 'More contact dunks on defenders', earn: 'Dunk (posterizers count triple)', need: [7, 26, 66, 154] },
+  acrobat:     { cat: 'Scoring', name: 'Acrobat', desc: 'Better layups through contact', earn: 'Make layups', need: [9, 33, 77, 176] },
+  catchShoot:  { cat: 'Scoring', name: 'Catch & Shoot', desc: 'Boost on jumpers right after a catch', earn: 'Make catch-and-shoot jumpers', need: [7, 26, 66, 154] },
+  deadeye:     { cat: 'Scoring', name: 'Deadeye', desc: 'Contests hurt your jumper less', earn: 'Make contested jumpers', need: [7, 22, 55, 132] },
+  fadeAce:     { cat: 'Scoring', name: 'Fade Ace', desc: 'Better post fades and hooks', earn: 'Make post fades and hooks', need: [4, 18, 44, 110] },
+  greenMachine:{ cat: 'Scoring', name: 'Green Machine', desc: 'Bigger green window after a green', earn: 'Green releases', need: [9, 33, 77, 176] },
+  bully:       { cat: 'Scoring', name: 'Bully', desc: 'Stronger post backdowns', earn: 'Back defenders down in the post', need: [13, 55, 132, 308] },
+  ankleBreaker:{ cat: 'Playmaking', name: 'Ankle Breaker', desc: 'Dribble moves shake defenders more', earn: 'Beat defenders (ankle breakers count triple)', need: [9, 33, 77, 176] },
+  dimer:       { cat: 'Playmaking', name: 'Dimer', desc: 'Teammates shoot better off your passes', earn: 'Assists', need: [9, 33, 88, 198] },
+  needle:      { cat: 'Playmaking', name: 'Needle Threader', desc: 'Your passes are harder to intercept', earn: 'Complete passes', need: [33, 132, 330, 770] },
+  interceptor: { cat: 'Defense', name: 'Interceptor', desc: 'More steals and picked-off passes', earn: 'Steals', need: [7, 22, 55, 132] },
+  rimProtector:{ cat: 'Defense', name: 'Rim Protector', desc: 'Better shot blocking', earn: 'Blocks', need: [7, 22, 55, 132] },
+  clamps:      { cat: 'Defense', name: 'Clamps', desc: 'Dribble moves fail more against you, tighter contests', earn: 'Force misses', need: [9, 33, 77, 176] },
+  rebound:     { cat: 'Defense', name: 'Rebound Chaser', desc: 'Win more rebounds', earn: 'Rebounds', need: [13, 55, 132, 308] },
+  brickWall:   { cat: 'Defense', name: 'Brick Wall', desc: 'Screens and charges hit harder', earn: 'Screens and charges taken', need: [7, 22, 55, 132] },
 };
 export function badgeTier(key, count) {
   const need = BADGES[key].need;

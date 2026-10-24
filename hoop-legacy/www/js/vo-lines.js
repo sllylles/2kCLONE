@@ -75,6 +75,31 @@ export const VO = {
   "text": "Easy, easy. Save it for the game. They want you to lose your head.",
   "dur": 3.75
  },
+ "goat_finishing": {
+  "role": "announcer",
+  "text": "Oh! GOAT Finisher, activated! Nobody is stopping him at the rim!",
+  "dur": 3.39
+ },
+ "goat_shooting": {
+  "role": "announcer",
+  "text": "GOAT Shooter, activated! He is cooking from everywhere!",
+  "dur": 2.77
+ },
+ "goat_playmaking": {
+  "role": "announcer",
+  "text": "GOAT Playmaker, activated! He has got them on a string!",
+  "dur": 2.92
+ },
+ "goat_defense": {
+  "role": "announcer",
+  "text": "GOAT Defender, activated! Lock him up, nothing is getting through!",
+  "dur": 3.31
+ },
+ "goat_rebounding": {
+  "role": "announcer",
+  "text": "GOAT Rebounder, activated! Every board belongs to him now!",
+  "dur": 3.39
+ },
  "iv_college_intro": {
   "role": "narrator",
   "text": "A camera crew catches you outside the gym on your first day on campus.",

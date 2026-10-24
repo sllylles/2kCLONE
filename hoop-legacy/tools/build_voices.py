@@ -18,7 +18,7 @@ OUT = os.path.join(ROOT, 'www', 'audio', 'vo')
 CAST = {
     'narrator': ('am_michael', 1.0), 'coach': ('am_onyx', 0.95), 'you': ('am_liam', 1.0), 'rival': ('am_fenrir', 1.02),
     'star': ('am_puck', 1.0), 'mate': ('am_echo', 1.05), 'dre': ('am_eric', 1.05), 'press': ('am_adam', 1.0),
-    'courtside': ('af_heart', 1.05), 'beat': ('af_sarah', 1.0), 'tv': ('am_michael', 0.97),
+    'courtside': ('af_heart', 1.05), 'beat': ('af_sarah', 1.0), 'tv': ('am_michael', 0.97), 'announcer': ('am_adam', 1.12),
 }
 
 LINES = {
@@ -41,6 +41,12 @@ LINES = {
     'heated_2': ('you', 'Lucky? Look at the scoreboard from last time.'),
     'heated_3': ('star', "Keep talking. We'll see who's still standing in the fourth."),
     'heated_4': ('mate', 'Easy, easy. Save it for the game. They want you to lose your head.'),
+    # In-game announcer: GOAT skill activations
+    'goat_finishing': ('announcer', 'Oh! GOAT Finisher, activated! Nobody is stopping him at the rim!'),
+    'goat_shooting': ('announcer', 'GOAT Shooter, activated! He is cooking from everywhere!'),
+    'goat_playmaking': ('announcer', 'GOAT Playmaker, activated! He has got them on a string!'),
+    'goat_defense': ('announcer', 'GOAT Defender, activated! Lock him up, nothing is getting through!'),
+    'goat_rebounding': ('announcer', 'GOAT Rebounder, activated! Every board belongs to him now!'),
     # Interviews: the intro is narrated, the questions are asked by the interviewer
     'iv_college_intro': ('narrator', 'A camera crew catches you outside the gym on your first day on campus.'),
     'iv_college_0': ('dre', "Everybody's calling you the best freshman in the country. You agree?"),

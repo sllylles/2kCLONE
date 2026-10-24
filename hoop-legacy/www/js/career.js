@@ -1,5 +1,5 @@
 // MyCareer state machine: showcase → draft → (G League) → NBA → playoffs → Finals.
-import { TEAMS, SHOWCASE_TEAMS, GLEAGUE_NICKS, POSITIONS, POS_ORDER, PLAYSTYLES, ATTRS, SKIN_TONES, HAIR, BUILDS, HEIGHT_MODS, BADGES, badgeTier, heightIn, HS_TEAMS, COLLEGES,
+import { NBA_COMPS, STYLE_ADJ, STYLE_NOUN, CAP_FLOOR, CAP_BUDGET, ANIMS, animFor, animAllowed, TEAMS, SHOWCASE_TEAMS, GLEAGUE_NICKS, POSITIONS, POS_ORDER, PLAYSTYLES, ATTRS, SKIN_TONES, HAIR, BUILDS, HEIGHT_MODS, BADGES, badgeTier, heightIn, HS_TEAMS, COLLEGES,
   buildRatings, overall, randName, clamp, gradeLetter, upgradeCost, attrCap } from './data.js';
 
 const SAVE_KEY = 'hoops.career.v1';
@@ -22,7 +22,12 @@ export function loadSettings() {
   catch (e) { return { ...DEFAULT_SETTINGS }; }
 }
 export function saveSettings(s) { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* ignore */ } }
-export function loadCareer() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return null; } }
+export function loadCareer() { try { const c = JSON.parse(localStorage.getItem(SAVE_KEY)); if (c) migrate(c); return c; } catch (e) { return null; } }
+// Older saves: give them VC, an animation locker that matches what they had picked, and tasks
+function migrate(c) {
+  if (c.vc == null) c.vc = 0;
+  if (!c.anims) initAnims(c);
+}
 export function saveCareer(c) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(c)); } catch (e) { /* ignore */ } }
 export function deleteCareer() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } }
 
@@ -69,17 +74,154 @@ export function generateRoster(teamId, teamOvr, seed) {
 
 export const START_OVR = 40;
 
-export function startingRatings(pos, style, rng = Math.random, inches = null, build = 'athletic', target = START_OVR) {
+export function startingRatings(pos, style, rng = Math.random, inches = null, build = 'athletic', target = START_OVR, caps = null) {
   const r = buildRatings(pos, style, 40, rng, 2);
   const dIn = inches == null ? 0 : inches - heightIn(POSITIONS[pos].height);
   for (const k in HEIGHT_MODS) r[k] = clamp(Math.round(r[k] + HEIGHT_MODS[k] * dIn), 25, 99);
   const bm = (BUILDS[build] || BUILDS.athletic).mods;
   for (const k in bm) r[k] = clamp(r[k] + bm[k], 25, 99);
-  const out = tuneToOverall(r, pos, target);
   const inch = inches == null ? heightIn(POSITIONS[pos].height) : inches;
-  for (const k in out) out[k] = Math.min(out[k], attrCap(k, inch, build));
+  if (caps) {
+    // Your potential shapes where you start: high-potential attributes start ahead of the rest
+    const mean = Object.values(caps).reduce((a, b) => a + b, 0) / Object.keys(caps).length;
+    for (const k in r) if (caps[k] != null) r[k] = clamp(Math.round(r[k] + (caps[k] - mean) * 0.5), 25, 99);
+  }
+  const out = tuneToOverall(r, pos, target);
+  for (const k in out) out[k] = Math.min(out[k], attrCap(k, inch, build), caps && caps[k] != null ? caps[k] : 99);
   return out;
 }
+
+// ---------- Builds: attribute potential ----------
+// The most each attribute can reach for this body
+export function capMaxes(inches, build) {
+  const m = {};
+  for (const a of ATTRS) m[a.key] = attrCap(a.key, inches, build);
+  return m;
+}
+export function capsSpent(caps) { return ATTRS.reduce((t, a) => t + Math.max(0, (caps[a.key] ?? CAP_FLOOR) - CAP_FLOOR), 0); }
+// An archetype's potential: the budget spread by what the position and playstyle lean on
+export function capsForStyle(pos, style, inches, build) {
+  const pm = POSITIONS[pos].mods, sm = PLAYSTYLES[style].mods, mx = capMaxes(inches, build);
+  const w = {};
+  for (const a of ATTRS) w[a.key] = Math.max(0.2, 1 + ((pm[a.key] || 0) + (sm[a.key] || 0) * 1.6) / 10);
+  const caps = {};
+  for (const a of ATTRS) caps[a.key] = CAP_FLOOR;
+  let left = CAP_BUDGET;
+  for (let it = 0; it < 8 && left > 0.5; it++) {
+    const open = ATTRS.filter(a => caps[a.key] < mx[a.key]);
+    const tw = open.reduce((t, a) => t + w[a.key], 0);
+    if (!tw) break;
+    let used = 0;
+    for (const a of open) { const add = Math.min(mx[a.key] - caps[a.key], left * w[a.key] / tw); caps[a.key] += add; used += add; }
+    left -= used;
+  }
+  for (const a of ATTRS) caps[a.key] = Math.min(mx[a.key], Math.floor(caps[a.key]));
+  return caps;
+}
+// What a set of potentials plays like: main archetype, secondary, a build name and an NBA comparison
+export function describeBuild(pos, caps) {
+  const vals = ATTRS.map(a => caps[a.key] ?? CAP_FLOOR);
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const score = {};
+  for (const [k, s] of Object.entries(PLAYSTYLES)) {
+    let t = 0, n = 0;
+    for (const [attr, m] of Object.entries(s.mods)) { t += ((caps[attr] ?? CAP_FLOOR) - mean) * m; n += m; }
+    score[k] = t / n;
+  }
+  const order = Object.keys(score).sort((a, b) => score[b] - score[a]);
+  const [primary, secondary] = order;
+  const name = `${STYLE_ADJ[secondary]} ${STYLE_NOUN[primary]}`;
+  return { style: primary, secondary, name, comp: NBA_COMPS[pos][primary] };
+}
+
+// ---------- Animations + VC ----------
+const ANIM_CAT_KEYS = { jumpshot: 'jumpshot', dribble: 'dribble', dunk: 'dunkPkg', defense: 'defStance' };
+export function initAnims(c) {
+  const P = c.player;
+  const owned = ANIMS.filter(a => !a.vc || (a.base && a.base.includes(P.position))).map(a => a.id);
+  const pick = (cat, key) => (ANIMS.find(a => a.cat === cat && a.key === key && owned.includes(a.id)) || ANIMS.find(a => a.cat === cat && !a.vc)).id;
+  // Old saves picked a dribble style and jumpshot directly: keep them owned and equipped
+  for (const [cat, key] of [['dribble', P.dribble], ['jumpshot', P.jumpshot]]) {
+    const a = ANIMS.find(x => x.cat === cat && x.key === key);
+    if (a && !owned.includes(a.id)) owned.push(a.id);
+  }
+  c.anims = {
+    owned,
+    equipped: { jumpshot: pick('jumpshot', P.jumpshot || 'standard'), dribble: pick('dribble', P.dribble || (['PF', 'C'].includes(P.position) ? 'power' : 'quick')), dunk: 'dk_standard', defense: 'df_standard' },
+    recent: [],
+  };
+  if (c.vc == null) c.vc = 0;
+  checkAnimUnlocks(c);
+  for (const r of c.anims.recent) r.seen = true; // nothing is "new" on day one
+}
+export function animMet(c, a) { return Object.entries(a.req || {}).every(([k, v]) => (c.player.ratings[k] || 0) >= v); }
+// Unlock everything whose attribute requirements you now meet; returns the newly unlocked animations
+export function checkAnimUnlocks(c) {
+  const A = c.anims, pos = c.player.position, out = [];
+  for (const a of ANIMS) {
+    if (A.owned.includes(a.id) || !animAllowed(a, pos) || !animMet(c, a)) continue;
+    A.owned.push(a.id); out.push(a);
+    A.recent.unshift({ id: a.id, how: 'stat', seen: false });
+  }
+  A.recent = A.recent.slice(0, 12);
+  return out;
+}
+export function buyAnim(c, id) {
+  const a = animFor(id), A = c.anims;
+  if (!a || A.owned.includes(id) || !animAllowed(a, c.player.position) || c.vc < a.vc) return false;
+  c.vc -= a.vc; A.owned.push(id);
+  A.recent.unshift({ id, how: 'vc', seen: false }); A.recent = A.recent.slice(0, 12);
+  return true;
+}
+export function equipAnim(c, id) {
+  const a = animFor(id);
+  if (!a || !c.anims.owned.includes(id) || !animAllowed(a, c.player.position)) return false;
+  c.anims.equipped[a.cat] = id;
+  if (a.cat === 'dribble') c.player.dribble = a.key;
+  if (a.cat === 'jumpshot') c.player.jumpshot = a.key;
+  return true;
+}
+// Equipped animations as game options
+export function animOpts(c) {
+  const out = {};
+  for (const [cat, opt] of Object.entries(ANIM_CAT_KEYS)) { const a = animFor(c.anims.equipped[cat]); if (a) out[opt] = a.key; }
+  return { dribbleStyle: out.dribble, jumpshot: out.jumpshot, dunkPkg: out.dunkPkg, defStance: out.defStance };
+}
+export function newAnimCount(c) { return c.anims ? c.anims.recent.filter(r => !r.seen).length : 0; }
+
+// ---------- Game tasks ----------
+const TASK_POOL = {
+  pts: { text: n => `Score ${n}+ points`, stat: s => s.pts, base: m => Math.max(4, Math.round(m * 0.22)) },
+  ast: { text: n => `Dish ${n}+ assists`, stat: s => s.ast, base: m => Math.max(2, Math.round(m * 0.08)) },
+  reb: { text: n => `Grab ${n}+ rebounds`, stat: s => s.reb, base: m => Math.max(2, Math.round(m * 0.1)) },
+  stocks: { text: n => `Get ${n}+ steals + blocks`, stat: s => s.stl + s.blk, base: m => Math.max(1, Math.round(m * 0.05)) },
+  threes: { text: n => `Hit ${n}+ three${n > 1 ? 's' : ''}`, stat: s => s.tpm, base: m => Math.max(1, Math.round(m * 0.04)) },
+  greens: { text: n => `Green ${n} jumper${n > 1 ? 's' : ''}`, stat: (s, x) => x.greens || 0, base: m => Math.max(1, Math.round(m * 0.04)), playOnly: true },
+  dunks: { text: n => `Throw down ${n} dunk${n > 1 ? 's' : ''}`, stat: s => s.dnk || 0, base: m => Math.max(1, Math.round(m * 0.05)), playOnly: true },
+  eff: { text: () => 'Shoot 50% or better (3+ shots)', stat: s => (s.fga >= 3 && s.fgm / s.fga >= 0.5 ? 1 : 0), base: () => 1 },
+  grade: { text: () => 'Earn a B or better teammate grade', stat: (s, x) => (x.gradeScore >= 75 ? 1 : 0), base: () => 1 },
+  win: { text: () => 'Win the game', stat: (s, x) => (x.win ? 1 : 0), base: () => 1 },
+};
+const STYLE_TASKS = { playmaker: ['ast'], sharpshooter: ['threes', 'greens'], slasher: ['dunks', 'pts'], lockdown: ['stocks'], twoway: ['stocks', 'pts'], post: ['pts', 'eff'], glass: ['reb', 'stocks'] };
+// Three tasks for the next game (kept until it's played), each worth AP and VC
+export function gameTasks(c, settings) {
+  const key = c.history.length + ':' + c.phase;
+  if (c.tasks && c.tasks.key === key) return c.tasks.list;
+  const P = c.player, mins = 4 * ((settings && settings.qLen) || 3);
+  const pool = [...(STYLE_TASKS[P.style] || ['pts'])];
+  if (P.ratings.dunk < 60) { const i = pool.indexOf('dunks'); if (i >= 0) pool.splice(i, 1, 'pts'); }
+  const pickOne = arr => arr[Math.floor(Math.random() * arr.length)];
+  const ids = [pickOne(pool)];
+  const rest = ['pts', 'ast', 'reb', 'stocks', 'threes', 'greens', 'eff', 'grade', 'win'].filter(k => !ids.includes(k) && !(k === 'threes' && P.ratings.three < 55));
+  while (ids.length < 3) { const k = pickOne(rest); if (!ids.includes(k)) ids.push(k); }
+  const list = ids.map(id => {
+    const T = TASK_POOL[id], n = T.base(mins);
+    return { id, n, text: T.text(n), ap: 3, vc: id === 'win' || id === 'grade' ? 200 : 250 + n * 15 };
+  });
+  c.tasks = { key, list };
+  return list;
+}
+export function taskProgress(t, stats, extra) { return TASK_POOL[t.id].stat(stats, extra || {}); }
 
 export function badgeTiers(c) {
   const out = {};
@@ -103,7 +245,8 @@ export function addBadgeProgress(c, counts) {
 
 export function newCareer(p) {
   const inches = p.heightIn || heightIn(POSITIONS[p.position].height);
-  const ratings = startingRatings(p.position, p.style, Math.random, inches, p.build || 'athletic');
+  const caps = p.caps || capsForStyle(p.position, p.style, inches, p.build || 'athletic');
+  const ratings = startingRatings(p.position, p.style, Math.random, inches, p.build || 'athletic', START_OVR, caps);
   const teamOvr = {};
   const rng = mulberry(Date.now() & 0xffff);
   for (const t of TEAMS) teamOvr[t.id] = Math.round(73 + rng() * 11);
@@ -111,7 +254,8 @@ export function newCareer(p) {
     version: 1,
     storyV: 2,
     seed: Math.floor(Math.random() * 1e6),
-    player: { ...p, ratings, heightFt: inches / 12, build: p.build || 'athletic' },
+    player: { ...p, caps, ratings, heightFt: inches / 12, build: p.build || 'athletic' },
+    vc: 500,
     badges: {},
     ap: 0,
     phase: 'hs',
@@ -132,6 +276,7 @@ export function newCareer(p) {
     awards: [],
     pendingStory: 'intro',
   };
+  initAnims(c);
   return c;
 }
 
@@ -202,7 +347,8 @@ function boostTop(c, n, amt) {
 // This player's cap for an attribute (height + build)
 export function capOf(c, key) {
   const P = c.player;
-  return attrCap(key, Math.round(P.heightFt * 12), P.build || 'athletic');
+  const hard = attrCap(key, Math.round(P.heightFt * 12), P.build || 'athletic');
+  return P.caps && P.caps[key] != null ? Math.min(hard, P.caps[key]) : hard;
 }
 export function resignTeam(c) {
   c.ap += 15;
@@ -372,7 +518,19 @@ export function applyResult(c, info, res) {
   let ap = 4 + gradeAP + Math.floor(s.pts / 4) + Math.floor((s.reb + s.ast + s.stl * 2 + s.blk * 2) / 3) + (win ? 3 : 0);
   ap = Math.round(ap * info.apMult * (res.simmed ? 0.6 : 1));
   c.ap += ap;
-  const out = { ap, letter, gradeScore, win, notes: [], boosts: [], badgeUps: [] };
+  const out = { ap, letter, gradeScore, win, notes: [], boosts: [], badgeUps: [], tasks: [], vc: 0, newAnims: [] };
+  // Game tasks: each one done is worth AP and VC (played games only for greens/dunks)
+  const extra = { greens: (res.badgeCounts || {}).greenMachine || 0, gradeScore, win };
+  for (const t of (c.tasks && c.tasks.list) || []) {
+    const n = taskProgress(t, s, extra), done = n >= t.n && !(res.simmed && (t.id === 'greens' || t.id === 'dunks'));
+    out.tasks.push({ text: t.text, done, ap: t.ap, vc: t.vc, n });
+    if (done) { c.ap += t.ap; out.ap += t.ap; out.vc += t.vc; }
+  }
+  c.tasks = null;
+  // VC for playing: more for a good grade and a win, less when simmed
+  const gradeVC = { A: 260, B: 180, C: 120, D: 70, F: 40 }[letter[0]] || 40;
+  out.vc += Math.round((150 + gradeVC + (win ? 100 : 0)) * (res.simmed ? 0.5 : 1));
+  c.vc = (c.vc || 0) + out.vc;
   const bc = res.badgeCounts || { dimer: s.ast, interceptor: s.stl, rimProtector: s.blk, rebound: s.reb };
   out.badgeUps = addBadgeProgress(c, bc);
   c.totals.gp++; for (const k of ['pts', 'reb', 'ast', 'stl', 'blk']) c.totals[k] += s[k];
@@ -462,6 +620,7 @@ export function applyResult(c, info, res) {
     else if (sr.wins[1] >= need) advancePlayoffs(c, out, false);
     else out.notes.push(`Series: ${sr.wins[0]}-${sr.wins[1]}`);
   }
+  if (c.anims) out.newAnims = checkAnimUnlocks(c);
   return out;
 }
 

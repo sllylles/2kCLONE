@@ -103,12 +103,14 @@ export function animProfile(p, picks = {}) {
     dribLow: handle * (dribble === 'flashy' ? 0.75 : 1),
     dribWide: dribble === 'flashy' ? 0.35 : dribble === 'shifty' ? 0.2 : 0,
     // Shooting: set point height, form (poor shooters flare the elbow), leg kick, follow-through
-    setHi: (jumpshot === 'higharc' ? 0.3 : jumpshot === 'quick' ? -0.25 : 0) + big * 0.15,
+    setHi: ((JUMPSHOTS[jumpshot] && JUMPSHOTS[jumpshot].setHi) || 0) + big * 0.15,
+    dunkPkg: picks.dunk || null, defStance: picks.defense || null,
     form: c01((shot - 45) / 45),
     kick: rnd(4) < 0.22 ? (rnd(5) < 0.5 ? 1 : -1) : 0,
     dunkFlair, power: c01(strong * 0.6 + big * 0.6),
     // Defense: stance depth and activity; bigs keep their hands high
-    D, defHigh: big,
+    D: picks.defense === 'lock' ? Math.max(D, 0.95) : D,
+    defHigh: picks.defense === 'wall' ? Math.max(big, 0.8) : picks.defense === 'lock' ? Math.min(big, 0.3) : big,
     // Running: bigs stride long and slow with less arm pump, guards are quick and lean in
     cadence: 1 + guard * 0.1 - big * 0.12, stride: 1 + big * 0.12 - guard * 0.05, pump: 1 + guard * 0.15 - big * 0.2,
     heavy: 0.8 + strong * 0.4 + big * 0.2,
@@ -117,9 +119,54 @@ export function animProfile(p, picks = {}) {
 
 export const JUMPSHOTS = {
   standard: { name: 'Standard', fill: 0.62, window: 1.0 },
-  quick:    { name: 'Quick Release', fill: 0.50, window: 0.85 },
-  higharc:  { name: 'High Arc', fill: 0.74, window: 1.2 },
+  quick:    { name: 'Quick Release', fill: 0.50, window: 0.85, setHi: -0.25 },
+  higharc:  { name: 'High Arc', fill: 0.74, window: 1.2, setHi: 0.3 },
+  sniper:   { name: 'Sniper', fill: 0.52, window: 1.1, setHi: 0.1 },
+  lowset:   { name: 'Low Set Point', fill: 0.54, window: 0.95, setHi: -0.35 },
+  bigset:   { name: 'Big Man Set Shot', fill: 0.7, window: 1.15, setHi: 0.35 },
 };
+
+// ---------- Builds ----------
+// Who your build plays like, by position and archetype (comparisons only)
+export const NBA_COMPS = {
+  PG: { playmaker: 'Chris Paul', sharpshooter: 'Stephen Curry', slasher: 'Ja Morant', lockdown: 'Jrue Holiday', twoway: 'Shai Gilgeous-Alexander', post: 'Jalen Brunson', glass: 'Russell Westbrook' },
+  SG: { playmaker: 'James Harden', sharpshooter: 'Klay Thompson', slasher: 'Anthony Edwards', lockdown: 'Dyson Daniels', twoway: 'Derrick White', post: 'DeMar DeRozan', glass: 'Josh Hart' },
+  SF: { playmaker: 'LeBron James', sharpshooter: 'Michael Porter Jr.', slasher: 'Jimmy Butler', lockdown: 'Kawhi Leonard', twoway: 'Jayson Tatum', post: 'Kevin Durant', glass: 'Scottie Barnes' },
+  PF: { playmaker: 'Draymond Green', sharpshooter: 'Lauri Markkanen', slasher: 'Zion Williamson', lockdown: 'Jaren Jackson Jr.', twoway: 'Giannis Antetokounmpo', post: 'Paolo Banchero', glass: 'Dennis Rodman' },
+  C:  { playmaker: 'Nikola Jokić', sharpshooter: 'Karl-Anthony Towns', slasher: "Shaquille O'Neal", lockdown: 'Rudy Gobert', twoway: 'Victor Wembanyama', post: 'Joel Embiid', glass: 'Andre Drummond' },
+};
+export const STYLE_ADJ = { playmaker: 'Playmaking', sharpshooter: 'Sharpshooting', slasher: 'Slashing', lockdown: 'Lockdown', twoway: 'Two-Way', post: 'Post-Scoring', glass: 'Glass-Cleaning' };
+export const STYLE_NOUN = { playmaker: 'Playmaker', sharpshooter: 'Sharpshooter', slasher: 'Slasher', lockdown: 'Defender', twoway: 'Two-Way Threat', post: 'Post Scorer', glass: 'Glass Cleaner' };
+// Build your own: every attribute's potential starts at 60 and you get this many points to raise them
+// (up to the max your height and build allow)
+export const CAP_FLOOR = 60;
+export const CAP_BUDGET = 330;
+
+// ---------- Animations ----------
+// Unlocked by hitting the attribute requirement, or bought early with VC. `pos` limits who can equip it.
+export const ANIM_CATS = { jumpshot: 'Jumpshots', dribble: 'Dribble Styles', dunk: 'Dunk Packages', defense: 'Defensive Stances' };
+export const ANIMS = [
+  { id: 'js_standard', cat: 'jumpshot', key: 'standard', name: 'Base Jumper', desc: 'Balanced timing.', req: {}, vc: 0 },
+  { id: 'js_higharc', cat: 'jumpshot', key: 'higharc', name: 'High Arc', desc: 'Slow and steady, high set point, bigger green window.', req: { mid: 65 }, vc: 800 },
+  { id: 'js_bigset', cat: 'jumpshot', key: 'bigset', name: 'Big Man Set Shot', desc: 'High, slow set shot with a big green window.', req: { mid: 58 }, vc: 600, pos: ['PF', 'C'] },
+  { id: 'js_quick', cat: 'jumpshot', key: 'quick', name: 'Quick Release', desc: 'Fast release, smaller green window.', req: { three: 70 }, vc: 1500 },
+  { id: 'js_lowset', cat: 'jumpshot', key: 'lowset', name: 'Low Set Point', desc: 'Quick, low set point off the dribble.', req: { mid: 74 }, vc: 2000, pos: ['PG', 'SG', 'SF'] },
+  { id: 'js_sniper', cat: 'jumpshot', key: 'sniper', name: 'Sniper', desc: 'Elite quick release that keeps a big green window.', req: { three: 86 }, vc: 4000, pos: ['PG', 'SG', 'SF', 'PF'] },
+  { id: 'dr_quick', cat: 'dribble', key: 'quick', name: 'Quick Handles', desc: DRIBBLE_STYLES.quick.desc, req: {}, vc: 0 },
+  { id: 'dr_power', cat: 'dribble', key: 'power', name: 'Power Handles', desc: DRIBBLE_STYLES.power.desc, req: { strength: 65 }, vc: 800, base: ['PF', 'C'] },
+  { id: 'dr_shifty', cat: 'dribble', key: 'shifty', name: 'Shifty Handles', desc: DRIBBLE_STYLES.shifty.desc, req: { handle: 70 }, vc: 1500, pos: ['PG', 'SG', 'SF', 'PF'] },
+  { id: 'dr_flashy', cat: 'dribble', key: 'flashy', name: 'Flashy Handles', desc: DRIBBLE_STYLES.flashy.desc, req: { handle: 82 }, vc: 3500, pos: ['PG', 'SG', 'SF'] },
+  { id: 'dk_standard', cat: 'dunk', key: 'standard', name: 'Standard Dunks', desc: 'One and two-handers, more as your dunk rating climbs.', req: {}, vc: 0 },
+  { id: 'dk_power', cat: 'dunk', key: 'power', name: 'Power Dunker', desc: 'Two-hand hammers, tomahawks and cock-backs.', req: { dunk: 70, strength: 62 }, vc: 1200 },
+  { id: 'dk_flyer', cat: 'dunk', key: 'flyer', name: 'High Flyer', desc: 'Windmills, 360s and between-the-legs whenever you get up.', req: { dunk: 80, vert: 78 }, vc: 3000, pos: ['PG', 'SG', 'SF', 'PF'] },
+  { id: 'dk_poster', cat: 'dunk', key: 'poster', name: 'Posterizer', desc: 'Goes right at defenders: far more contact dunks.', req: { dunk: 85 }, vc: 3500 },
+  { id: 'dk_elite', cat: 'dunk', key: 'elite', name: 'Elite Dunk Package', desc: 'Every dunk in the book, flashy and through contact.', req: { dunk: 92, vert: 85 }, vc: 6000 },
+  { id: 'df_standard', cat: 'defense', key: 'standard', name: 'Standard Stance', desc: 'Your defensive rating sets how low you sit.', req: {}, vc: 0 },
+  { id: 'df_lock', cat: 'defense', key: 'lock', name: 'Lockdown Stance', desc: 'Deep, wide and active, hands always working.', req: { perD: 80 }, vc: 2000, pos: ['PG', 'SG', 'SF', 'PF'] },
+  { id: 'df_wall', cat: 'defense', key: 'wall', name: 'Big Wall', desc: 'One hand high to wall off the rim and lobs.', req: { intD: 75 }, vc: 1500, pos: ['SF', 'PF', 'C'] },
+];
+export function animFor(id) { return ANIMS.find(a => a.id === id); }
+export function animAllowed(a, pos) { return !a.pos || a.pos.includes(pos); }
 
 export const SKIN_TONES = ['#f1c9a5', '#e0ac69', '#c68642', '#a0663a', '#8d5524', '#5c3a1e'];
 export const HAIR = ['Bald', 'Buzz', 'Fade', 'Afro', 'Swoop'];

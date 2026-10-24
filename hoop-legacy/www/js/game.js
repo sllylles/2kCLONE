@@ -47,13 +47,13 @@ export class Game {
       if (isUser && opts.boost) for (const k in r) r[k] = Math.min(99, r[k] + opts.boost);
       this.players.push({
         ...def, r, team: t, slot, idx: this.players.length, isUser,
-        anim: animProfile({ ...def, r }, isUser ? { dribble: opts.dribbleStyle, jumpshot: opts.jumpshot } : {}),
+        anim: animProfile({ ...def, r }, isUser ? { dribble: opts.dribbleStyle, jumpshot: opts.jumpshot, dunk: opts.dunkPkg, defense: opts.defStance } : {}),
         toType: takeoverType(r, isUser ? opts.playstyle : null), toMeter: 0, toOn: false,
         pos: { x: 0, z: 0 }, vel: { x: 0, z: 0 }, y: 0, vy: 0, facing: 0,
         action: null, actionT: 0, actionDur: 0, stun: 0, hasBall: false, holding: false,
         dribblePhase: 0, dribbleHand: 'R', energy: 100, aiT: 0, aiTarget: null, spotT: 0, spot: null,
         push: { x: 0, z: 0 }, hitT: 0, post: false, oobUntil: 0,
-        stats: { pts: 0, reb: 0, oreb: 0, ast: 0, stl: 0, blk: 0, tov: 0, fgm: 0, fga: 0, tpm: 0, tpa: 0, ftm: 0, fta: 0, pf: 0 },
+        stats: { pts: 0, reb: 0, oreb: 0, ast: 0, stl: 0, blk: 0, tov: 0, fgm: 0, fga: 0, tpm: 0, tpa: 0, ftm: 0, fta: 0, pf: 0, dnk: 0 },
       });
     }));
     this.user = this.players.find(p => p.isUser);
@@ -945,7 +945,12 @@ export class Game {
 
   // Better dunkers unlock more dunk styles
   pickDunk(p) {
-    const r = p.r.dunk, a = p.anim || {}, fin = this.toIs(p, 'finishing'), flair = fin ? 1 : a.dunkFlair || 0, pw = a.power || 0;
+    const pkg = (p.anim && p.anim.dunkPkg) || 'standard';
+    const r = p.r.dunk, a = p.anim || {}, fin = this.toIs(p, 'finishing');
+    // Dunk package (equipped animation): power, high flyer, posterizer or the elite everything package
+    const flair = fin || pkg === 'flyer' || pkg === 'elite' ? 1 : pkg === 'power' ? 0 : a.dunkFlair || 0;
+    const pw = pkg === 'power' ? 1 : pkg === 'flyer' ? 0 : a.power || 0;
+    const posterBoost = pkg === 'poster' ? 0.25 : pkg === 'elite' ? 0.12 : 0;
     // Higher dunk ratings unlock flashier dunks; how a player dunks leans on their profile: high flyers
     // go flashy, bigs and strong builds go power (two hands, tomahawks, cock-backs)
     const pool = [['one', 3], ['two', 3 + pw * 5]];
@@ -969,7 +974,7 @@ export class Game {
       return len(q.pos.x - h.x, q.pos.z - h.z) < 8 && along > -1 && along < hl + 2 && perp < 4.5;
     });
     p.contactDef = null;
-    if (def && r >= 62 && chance(0.4 + (r - 62) / 80 + (fin ? 0.25 : 0))) { p.contactVar = Math.floor(Math.random() * 3); p.contactDef = def; return 'contact'; }
+    if (def && r >= 62 && chance(0.4 + (r - 62) / 80 + (fin ? 0.25 : 0) + posterBoost)) { p.contactVar = Math.floor(Math.random() * 3); p.contactDef = def; return 'contact'; }
     if (def) for (const e of pool) if (FLASHY_DUNKS.includes(e[0])) e[1] *= 0.2;
     let tot = pool.reduce((a, e) => a + e[1], 0), x = Math.random() * tot;
     for (const [k, w] of pool) { x -= w; if (x <= 0) return k; }
@@ -1206,7 +1211,7 @@ export class Game {
       this.emit('swish', { side: s.side, perfect: s.quality === 'perfect' });
       if (s.kind === 'ft') { this.ftResult(true); return; }
       this.score[p.team] += s.pts;
-      p.stats.pts += s.pts; p.stats.fgm++; if (s.three) p.stats.tpm++;
+      p.stats.pts += s.pts; p.stats.fgm++; if (s.three) p.stats.tpm++; if (s.kind === 'dunk') p.stats.dnk++;
       if (s.kind === 'layup') this.bc(p, 'acrobat');
       if (s.kind === 'jumper' && s.catchShot) this.bc(p, 'catchShoot');
       if (s.kind === 'jumper' && s.contest > 0.5) this.bc(p, 'deadeye');

@@ -1,7 +1,8 @@
 // App shell: screens, MyCareer flow, game loop and HUD.
 import { ATTRS, POSITIONS, PLAYSTYLES, DRIBBLE_STYLES, JUMPSHOTS, SKIN_TONES, HAIR, TEAMS, POS_ORDER,
   buildRatings, overall, gradeLetter, gradeColor, upgradeCost, HEIGHT_RANGES, BUILDS, heightIn, fmtHeight,
-  BADGES, BADGE_TIERS, BADGE_COLORS, badgeTier, TAKEOVERS } from './data.js';
+  BADGES, BADGE_TIERS, BADGE_COLORS, badgeTier, TAKEOVERS, takeoverType, NBA_COMPS, STYLE_ADJ, CAP_FLOOR, CAP_BUDGET,
+  ANIMS, ANIM_CATS, animFor, animAllowed } from './data.js';
 import * as C from './career.js';
 import { Game } from './game.js';
 import { Renderer } from './render.js';
@@ -17,7 +18,7 @@ const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;'
 loadPlayerPack();
 let settings = C.loadSettings();
 C.setMaxed(settings.maxed);
-const apText = c => C.isMaxed() ? '∞ AP' : `${c.ap} AP`;
+const apText = c => (C.isMaxed() ? '∞ AP' : `${c.ap} AP`) + ` · ${(c.vc || 0).toLocaleString()} VC`;
 let career = C.loadCareer();
 let screenStack = [];
 setMuted(!settings.sound);
@@ -60,6 +61,27 @@ $('btnNew').onclick = () => {
 };
 $('btnTitleSettings').onclick = () => { sfx.click(); renderSettings(); };
 
+// Game tasks list. With live stats it shows progress, after the game it shows done / not done.
+function tasksHTML(list, stats = null, extra = null, result = null) {
+  if (!list || !list.length) return '';
+  return `<div class="tasks"><div class="ng-label">GAME TASKS</div>${list.map((t, i) => {
+    const r = result && result[i];
+    const n = r ? r.n : stats ? C.taskProgress(t, stats, extra) : null;
+    const done = r ? r.done : n != null && n >= t.n;
+    return `<div class="task ${done ? 'done' : ''}"><i>${done ? '✓' : ''}</i><span>${esc(t.text)}${n != null && t.n > 1 && !done ? ` <em>${n}/${t.n}</em>` : ''}</span><b>+${t.ap} AP · +${t.vc} VC</b></div>`;
+  }).join('')}</div>`;
+}
+
+// Notice banner for menus (outside a game); tap it to run `onTap`
+let noticeT = null;
+function toastMenu(text, sub = '', color = 'var(--gold)', onTap = null) {
+  const n = $('notice');
+  n.innerHTML = `${esc(text)}${sub ? `<small>${esc(sub)}</small>` : ''}`;
+  n.style.borderLeftColor = color;
+  n.onclick = () => { n.classList.remove('show'); if (onTap) onTap(); };
+  n.classList.add('show');
+  clearTimeout(noticeT); noticeT = setTimeout(() => n.classList.remove('show'), 3600);
+}
 function confirmModal(text, yes) {
   const m = $('modal');
   m.innerHTML = `<div class="ov-card"><p>${esc(text)}</p><div class="ov-btns"><button class="btn ghost" id="mNo">CANCEL</button><button class="btn primary" id="mYes">YES</button></div></div>`;
@@ -69,23 +91,46 @@ function confirmModal(text, yes) {
 }
 
 // ---------------- Creator ----------------
-const draft = { name: '', num: 23, position: 'SG', heightIn: 78, build: 'athletic', style: 'sharpshooter', dribble: 'quick', jumpshot: 'standard', skin: SKIN_TONES[2], hair: 'Fade', headband: false, sleeve: false };
+// Name + number, then either build your own (spend a budget on attribute potential) or pick an
+// NBA-style archetype for your position. Shot and dribble animations are picked later on the Animations page.
+const draft = { name: '', num: 23, position: 'SG', heightIn: 78, build: 'athletic', style: 'sharpshooter', method: null, caps: null, dribble: 'quick', jumpshot: 'standard', skin: SKIN_TONES[2], hair: 'Fade', headband: false, sleeve: false };
 let cStep = 0;
-const C_STEPS = ['Identity', 'Position', 'Playstyle', 'Dribble & Shot', 'Look'];
+const C_STEPS = ['Identity', 'Build Type', 'Body', 'Attributes', 'Your Build', 'Look'];
 
 function startCreator() { cStep = 0; renderCreator(); show('scrCreate'); }
 
 function previewRatings() {
-  return C.startingRatings(draft.position, draft.style, () => 0.5, draft.heightIn, draft.build);
+  return C.startingRatings(draft.position, draft.style, () => 0.5, draft.heightIn, draft.build, C.START_OVR, draft.caps);
+}
+// Keep the potential valid for the current body (and refill an archetype's for a new body)
+function fixCaps() {
+  if (draft.method === 'nba' || !draft.caps) { draft.caps = C.capsForStyle(draft.position, draft.style, draft.heightIn, draft.build); return; }
+  const mx = C.capMaxes(draft.heightIn, draft.build);
+  for (const a of ATTRS) draft.caps[a.key] = Math.max(CAP_FLOOR, Math.min(mx[a.key], draft.caps[a.key] ?? CAP_FLOOR));
+}
+function syncBuild() {
+  if (!draft.caps) return;
+  const d = C.describeBuild(draft.position, draft.caps);
+  if (draft.method === 'own') { draft.style = d.style; draft.buildName = d.name; draft.comp = d.comp; }
+  else { draft.buildName = `${PLAYSTYLES[draft.style].name}`; draft.comp = NBA_COMPS[draft.position][draft.style]; }
 }
 
 function cardHTML(p, ratings, extra = '') {
   const ovr = overall(ratings, p.position);
   const top = ATTRS.map(a => ({ a, v: ratings[a.key] })).sort((x, y) => y.v - x.v).slice(0, 7);
+  const styleName = p.buildName || PLAYSTYLES[p.style].name;
   return `<div class="pc-top"><div class="pc-ovr">${ovr}<small>OVR</small></div>
-    <div><div class="pc-name">${esc(p.name || 'Your Name')}</div><div class="pc-sub">#${p.num} · ${fmtHeight(p.heightIn || heightIn(p.heightFt || POSITIONS[p.position].height))} ${POSITIONS[p.position].name} · ${PLAYSTYLES[p.style].name}${p.build && p.build !== 'athletic' ? ' · ' + BUILDS[p.build].name : ''}</div></div></div>
+    <div><div class="pc-name">${esc(p.name || 'Your Name')}</div><div class="pc-sub">#${p.num} · ${fmtHeight(p.heightIn || heightIn(p.heightFt || POSITIONS[p.position].height))} ${POSITIONS[p.position].name} · ${esc(styleName)}${p.build && p.build !== 'athletic' ? ' · ' + BUILDS[p.build].name : ''}</div>${p.comp ? `<div class="pc-comp">Plays like ${esc(p.comp)}</div>` : ''}</div></div>
     ${extra}
     <div class="bars">${top.map(({ a, v }) => `<div class="bar-row"><span>${a.name}</span><div class="track"><i style="width:${v}%"></i></div><b>${v}</b></div>`).join('')}</div>`;
+}
+function potentialBars(caps, n = 8) {
+  const top = ATTRS.map(a => ({ a, v: caps[a.key] })).sort((x, y) => y.v - x.v).slice(0, n);
+  return `<div class="ng-label" style="margin-top:6px">POTENTIAL</div><div class="bars">${top.map(({ a, v }) => `<div class="bar-row"><span>${a.name}</span><div class="track"><i class="pot" style="width:${v}%"></i></div><b>${v}</b></div>`).join('')}</div>`;
+}
+function refreshCreateCard() {
+  syncBuild();
+  $('createCard').innerHTML = cardHTML(draft, previewRatings(), draft.caps && cStep >= 3 ? potentialBars(draft.caps, 5) : '');
 }
 
 function renderCreator() {
@@ -96,36 +141,82 @@ function renderCreator() {
     m.innerHTML = `<h3>PLAYER NAME</h3><div class="field"><input id="inName" maxlength="22" placeholder="First Last" value="${esc(draft.name)}" autocomplete="off"></div>
       <h3>JERSEY NUMBER</h3><div class="wheel-wrap"><div class="wheel-band"></div><div class="wheel" id="numWheel"><div class="wpad"></div>${Array.from({ length: 100 }, (_, n) => `<div class="wi" data-n="${n}">${n}</div>`).join('')}<div class="wpad"></div></div></div>`;
     const inp = $('inName');
-    inp.addEventListener('input', () => { draft.name = inp.value; $('createCard').innerHTML = cardHTML(draft, previewRatings()); });
+    inp.addEventListener('input', () => { draft.name = inp.value; refreshCreateCard(); });
     setupWheel();
   } else if (cStep === 1) {
+    m.innerHTML = `<h3>HOW DO YOU WANT TO BUILD?</h3><div class="choices big">
+      ${choice('method', 'own', 'BUILD YOUR OWN', `Take charge of your attributes. Spend ${CAP_BUDGET} potential points however you want, then see what your build is called and who you play like.`, draft.method === 'own')}
+      ${choice('method', 'nba', 'NBA PLAYER BUILDS', 'Pick an archetype for your position, each one compared to a real NBA player. Your potential is set for you.', draft.method === 'nba')}</div>`;
+  } else if (cStep === 2) {
     const [hMin, hMax] = HEIGHT_RANGES[draft.position];
     m.innerHTML = `<h3>POSITION</h3><div class="choices">${POS_ORDER.map(k => choice('position', k, `${k} · ${POSITIONS[k].name}`, `${fmtHeight(HEIGHT_RANGES[k][0])} – ${fmtHeight(HEIGHT_RANGES[k][1])}`, draft.position === k)).join('')}</div>
       <h3>HEIGHT</h3><div class="field slider"><input type="range" id="inHeight" min="${hMin}" max="${hMax}" step="1" value="${draft.heightIn}"><b id="hLabel">${fmtHeight(draft.heightIn)}</b></div>
-      <small class="hint">Taller: better rebounding, blocking and inside D. Shorter: quicker with better handles and shooting.</small>
+      <small class="hint">Height and build set the most each attribute can ever reach. Taller: better rebounding, blocking and inside D. Shorter: quicker with better handles and shooting.</small>
       <h3>BUILD</h3><div class="choices">${Object.entries(BUILDS).map(([k, b]) => choice('build', k, b.name, b.desc, draft.build === k)).join('')}</div>`;
     const hs = $('inHeight');
-    hs.addEventListener('input', () => { draft.heightIn = +hs.value; $('hLabel').textContent = fmtHeight(draft.heightIn); $('createCard').innerHTML = cardHTML(draft, previewRatings()); });
-  } else if (cStep === 2) {
-    m.innerHTML = `<h3>PLAYSTYLE</h3><div class="choices">${Object.entries(PLAYSTYLES).map(([k, s]) => choice('style', k, s.name, s.desc, draft.style === k)).join('')}</div>`;
+    hs.addEventListener('input', () => { draft.heightIn = +hs.value; $('hLabel').textContent = fmtHeight(draft.heightIn); fixCaps(); refreshCreateCard(); });
+  } else if (cStep === 3 && draft.method === 'nba') {
+    const comps = NBA_COMPS[draft.position];
+    m.innerHTML = `<h3>${POSITIONS[draft.position].name.toUpperCase()} ARCHETYPES</h3><div class="choices">${Object.entries(PLAYSTYLES).map(([k, st]) =>
+      choice('style', k, `${st.name} <span class="comp">· ${esc(comps[k])}</span>`, st.desc, draft.style === k)).join('')}</div>`;
   } else if (cStep === 3) {
-    m.innerHTML = `<h3>DRIBBLE STYLE</h3><div class="choices">${Object.entries(DRIBBLE_STYLES).map(([k, s]) => choice('dribble', k, s.name, s.desc, draft.dribble === k)).join('')}</div>
-      <h3>JUMPSHOT</h3><div class="choices">${Object.entries(JUMPSHOTS).map(([k, s]) => choice('jumpshot', k, s.name, k === 'quick' ? 'Fast release, smaller green window.' : k === 'higharc' ? 'Slow and steady, bigger green window.' : 'Balanced timing.', draft.jumpshot === k)).join('')}</div>`;
+    const mx = C.capMaxes(draft.heightIn, draft.build);
+    let html = `<div class="cap-head"><h3>ATTRIBUTE POTENTIAL</h3><div class="cap-left"><b id="capLeft"></b><small>POINTS LEFT</small></div></div>
+      <small class="hint">Drag each bar to the most that attribute can reach. Your height and build set the max (the gray line). You start at 40 OVR and upgrade toward this.</small>
+      <div class="ov-btns" style="justify-content:flex-start;margin:6px 0"><button class="btn ghost small" id="capReset">RESET</button><button class="btn ghost small" id="capEven">SPREAD EVENLY</button></div>`;
+    let group = '';
+    for (const a of ATTRS) {
+      if (a.group !== group) { group = a.group; html += `<div class="up-group">${group.toUpperCase()}</div>`; }
+      html += `<div class="cap-row"><span>${a.name}</span><div class="cap-slider"><input type="range" min="${CAP_FLOOR}" max="99" step="1" value="${draft.caps[a.key]}" data-cap="${a.key}"><i class="cap-max" style="left:${(mx[a.key] - CAP_FLOOR) / (99 - CAP_FLOOR) * 100}%"></i></div><b id="capv_${a.key}">${draft.caps[a.key]}</b><small>/${mx[a.key]}</small></div>`;
+    }
+    m.innerHTML = html;
+    const paintLeft = () => { const left = CAP_BUDGET - C.capsSpent(draft.caps); $('capLeft').textContent = left; $('capLeft').style.color = left > 0 ? 'var(--gold)' : 'var(--green)'; };
+    paintLeft();
+    m.querySelectorAll('[data-cap]').forEach(el => el.addEventListener('input', () => {
+      const k = el.dataset.cap;
+      const others = C.capsSpent(draft.caps) - (draft.caps[k] - CAP_FLOOR);
+      const v = Math.max(CAP_FLOOR, Math.min(+el.value, mx[k], CAP_FLOOR + CAP_BUDGET - others));
+      draft.caps[k] = v; el.value = v; $('capv_' + k).textContent = v;
+      paintLeft(); refreshCreateCard();
+    }));
+    $('capReset').onclick = () => { sfx.click(); for (const a of ATTRS) draft.caps[a.key] = CAP_FLOOR; renderCreator(); };
+    $('capEven').onclick = () => {
+      sfx.click();
+      for (const a of ATTRS) draft.caps[a.key] = CAP_FLOOR;
+      for (let left = CAP_BUDGET, guard = 0; left > 0 && guard < 99; guard++) {
+        const open = ATTRS.filter(a => draft.caps[a.key] < mx[a.key]);
+        if (!open.length) break;
+        for (const a of open) { if (left <= 0) break; draft.caps[a.key]++; left--; }
+      }
+      renderCreator();
+    };
+  } else if (cStep === 4) {
+    syncBuild();
+    const d = C.describeBuild(draft.position, draft.caps);
+    m.innerHTML = `<div class="build-reveal"><div class="ng-label">YOUR BUILD</div><div class="br-name">${esc(draft.buildName)}</div>
+      <div class="br-pos">${fmtHeight(draft.heightIn)} ${BUILDS[draft.build].name} ${POSITIONS[draft.position].name}</div>
+      <div class="br-comp"><small>PLAYS LIKE</small><b>${esc(draft.comp)}</b></div>
+      <small class="hint">${draft.method === 'own' ? `Your potential leans ${STYLE_ADJ[d.style].toLowerCase()} with a ${STYLE_ADJ[d.secondary].toLowerCase()} side.` : PLAYSTYLES[draft.style].desc} Your takeover: ${TAKEOVERS[takeoverType({}, draft.style)].name}.</small></div>
+      ${potentialBars(draft.caps, 17)}`;
   } else {
     m.innerHTML = `<h3>SKIN TONE</h3><div class="swatches">${SKIN_TONES.map(c => `<button class="swatch ${draft.skin === c ? 'sel' : ''}" style="background:${c}" data-g="skin" data-k="${c}"></button>`).join('')}</div>
       <h3>HAIR</h3><div class="chips">${HAIR.map(h => `<button class="chip ${draft.hair === h ? 'sel' : ''}" data-g="hair" data-k="${h}">${h}</button>`).join('')}</div>
-      <h3>ACCESSORIES</h3><div class="chips"><button class="chip ${draft.headband ? 'sel' : ''}" data-g="headband" data-k="1">Headband</button><button class="chip ${draft.sleeve ? 'sel' : ''}" data-g="sleeve" data-k="1">Arm Sleeve</button></div>`;
+      <h3>ACCESSORIES</h3><div class="chips"><button class="chip ${draft.headband ? 'sel' : ''}" data-g="headband" data-k="1">Headband</button><button class="chip ${draft.sleeve ? 'sel' : ''}" data-g="sleeve" data-k="1">Arm Sleeve</button></div>
+      <small class="hint">Jumpshots, dribble styles, dunk packages and defensive stances are on the Animations page: you unlock more as your ratings climb.</small>`;
   }
   m.querySelectorAll('[data-g]').forEach(el => el.addEventListener('click', () => {
     sfx.click();
     const g = el.dataset.g, k = el.dataset.k;
     if (g === 'num') draft.num = +k;
-    else if (g === 'position') { draft.position = k; draft.heightIn = heightIn(POSITIONS[k].height); }
+    else if (g === 'method') { draft.method = k; draft.caps = null; fixCaps(); if (k === 'own') for (const a of ATTRS) draft.caps[a.key] = CAP_FLOOR; }
+    else if (g === 'position') { draft.position = k; draft.heightIn = heightIn(POSITIONS[k].height); draft.dribble = ['PF', 'C'].includes(k) ? 'power' : 'quick'; fixCaps(); }
+    else if (g === 'build') { draft.build = k; fixCaps(); }
+    else if (g === 'style') { draft.style = k; fixCaps(); }
     else if (g === 'headband' || g === 'sleeve') draft[g] = !draft[g];
     else draft[g] = k;
     renderCreator();
   }));
-  $('createCard').innerHTML = cardHTML(draft, previewRatings(), `<div class="pc-team">${DRIBBLE_STYLES[draft.dribble].name} handles · ${JUMPSHOTS[draft.jumpshot].name} jumper</div>`);
+  refreshCreateCard();
   $('createPrev').style.visibility = cStep === 0 ? 'hidden' : 'visible';
   $('createNext').textContent = cStep === C_STEPS.length - 1 ? 'START CAREER' : 'NEXT';
 }
@@ -160,9 +251,12 @@ $('createPrev').onclick = () => { sfx.click(); if (cStep > 0) { cStep--; renderC
 $('createNext').onclick = () => {
   sfx.click();
   if (cStep === 0 && !draft.name.trim()) { $('inName').focus(); $('inName').style.borderColor = 'var(--red)'; return; }
+  if (cStep === 1 && !draft.method) { toastMenu('Pick how you want to build'); return; }
+  if (cStep === 3 && draft.method === 'own' && C.capsSpent(draft.caps) < CAP_BUDGET * 0.6) { toastMenu(`Spend your potential points (${CAP_BUDGET - C.capsSpent(draft.caps)} left)`); return; }
   if (cStep < C_STEPS.length - 1) { cStep++; renderCreator(); return; }
   draft.name = draft.name.trim().replace(/\s+/g, ' ');
-  career = C.newCareer({ ...draft });
+  syncBuild();
+  career = C.newCareer({ ...draft, caps: { ...draft.caps } });
   syncCareerSettings();
   C.saveCareer(career);
   goCareer();
@@ -246,7 +340,9 @@ function renderHub() {
     <div class="ng-team">${teamLogo(info.opp)}<b>${esc(info.opp.name)}</b><small>${info.oppOvr} OVR</small></div></div>
     ${info.tag ? `<div class="ng-tag">${esc(info.tag)}</div>` : ''}
     ${meter}
+    ${tasksHTML(C.gameTasks(c, settings))}
     <div class="ng-btns"><button class="btn ghost" id="btnSim">SIM GAME</button><button class="btn primary" id="btnPlay">PLAY GAME</button></div>`;
+  C.saveCareer(c); // keep this game's tasks
   $('btnPlay').onclick = () => { sfx.click(); startMatch(info); };
   $('btnSim').onclick = () => {
     sfx.click();
@@ -257,12 +353,14 @@ function renderHub() {
   };
   $('hubUpgrade').innerHTML = `<b>UPGRADE ${c.ap > 0 || C.isMaxed() ? `<span class="badge">${C.isMaxed() ? '∞' : c.ap}</span>` : ''}</b><small>Spend attribute points</small>`;
   $('hubStandings').style.display = c.nba ? '' : 'none';
+  const na = C.newAnimCount(c);
+  $('hubStyle').innerHTML = `<b>ANIMATIONS ${na ? `<span class="badge">${na} NEW</span>` : ''}</b><small>Unlock &amp; equip · ${(c.vc || 0).toLocaleString()} VC</small>`;
 }
 
 $('hubUpgrade').onclick = () => { sfx.click(); renderUpgrade(); show('scrUpgrade'); };
 $('hubStandings').onclick = () => { sfx.click(); renderStandings(); };
 $('hubHistory').onclick = () => { sfx.click(); renderHistory(); };
-$('hubStyle').onclick = () => { sfx.click(); renderStyle(); };
+$('hubStyle').onclick = () => { sfx.click(); renderAnimations(C.newAnimCount(career) ? 'recent' : animTab); };
 $('hubBadges').onclick = () => { sfx.click(); renderBadges(); };
 
 function badgeChip(key, tier) {
@@ -321,7 +419,9 @@ function renderUpgrade() {
   $('upList').innerHTML = html;
   $('upList').querySelectorAll('.plus').forEach(b => b.addEventListener('click', () => {
     if (C.upgrade(c, b.dataset.k)) {
-      sfx.click(); C.saveCareer(c);
+      sfx.click();
+      announceUnlocks(C.checkAnimUnlocks(c));
+      C.saveCareer(c);
       const scroll = $('upList').scrollTop;
       renderUpgrade();
       $('upList').scrollTop = scroll;
@@ -350,15 +450,55 @@ function renderHistory() {
   show('scrList');
 }
 
-function renderStyle() {
-  const P = career.player;
-  $('listTitle').textContent = 'MY PLAYER';
-  const seg = (key, opts) => `<div class="seg">${Object.entries(opts).map(([k, v]) => `<button data-s="${key}" data-k="${k}" class="${P[key] === k ? 'on' : ''}">${v.name}</button>`).join('')}</div>`;
-  $('listBody').innerHTML = `
-    <div class="set-row"><label>Dribble Style<small>${DRIBBLE_STYLES[P.dribble].desc}</small></label>${seg('dribble', DRIBBLE_STYLES)}</div>
-    <div class="set-row"><label>Jumpshot<small>Changes meter speed and green window size</small></label>${seg('jumpshot', JUMPSHOTS)}</div>`;
-  $('listBody').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => { sfx.click(); P[b.dataset.s] = b.dataset.k; C.saveCareer(career); renderStyle(); }));
+// ---------------- Animations ----------------
+// Your position's list of jumpshots, dribble styles, dunk packages and defensive stances. They unlock when
+// your ratings hit the requirement (you get a notification), or you can buy them early with VC.
+let animTab = 'recent';
+function reqText(c, a) {
+  return Object.entries(a.req || {}).map(([k, v]) => {
+    const have = c.player.ratings[k] || 0;
+    return `<span class="${have >= v ? 'ok' : ''}">${v} ${ATTRS.find(x => x.key === k).name} (${have})</span>`;
+  }).join(' · ');
+}
+function animCard(c, a, isNew) {
+  const A = c.anims, own = A.owned.includes(a.id), eq = A.equipped[a.cat] === a.id;
+  const btn = eq ? `<button class="btn small eq" disabled>EQUIPPED</button>`
+    : own ? `<button class="btn small primary" data-eq="${a.id}">EQUIP</button>`
+      : `<button class="btn small" data-buy="${a.id}" ${c.vc < a.vc ? 'disabled' : ''}>BUY ${a.vc.toLocaleString()} VC</button>`;
+  return `<div class="anim ${own ? 'own' : 'locked'} ${eq ? 'eq' : ''}"><div class="ai"><b>${esc(a.name)}${isNew ? ' <em class="new">NEW</em>' : ''}</b>
+    <small class="cat">${ANIM_CATS[a.cat].replace(/s$/, '')}</small><small>${esc(a.desc)}</small>
+    ${own ? '' : `<small class="req">${Object.keys(a.req || {}).length ? 'Unlocks at ' + reqText(c, a) : ''}</small>`}</div>${btn}</div>`;
+}
+function renderAnimations(tab) {
+  const c = career, A = c.anims, pos = c.player.position;
+  if (tab) animTab = tab;
+  $('listTitle').textContent = `ANIMATIONS · ${(c.vc || 0).toLocaleString()} VC`;
+  const fresh = C.newAnimCount(c);
+  const tabs = [['recent', `RECENTLY UNLOCKED${fresh ? ` (${fresh})` : ''}`], ...Object.entries(ANIM_CATS).map(([k, v]) => [k, v.toUpperCase()])];
+  let html = `<div class="seg anim-tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${animTab === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  if (animTab === 'recent') {
+    html += `<p class="hint">Animations unlock as your ratings climb. You can also buy them early with VC, which you earn every game and from game tasks.</p>`;
+    html += A.recent.length ? A.recent.map(r => animCard(c, animFor(r.id), !r.seen)).join('') : '<p class="hint">Nothing new yet. Upgrade your attributes to unlock more.</p>';
+    for (const r of A.recent) r.seen = true;
+    C.saveCareer(c);
+  } else {
+    const list = ANIMS.filter(a => a.cat === animTab && animAllowed(a, pos));
+    html += `<p class="hint">${POSITIONS[pos].name} ${ANIM_CATS[animTab].toLowerCase()}.</p>` + list.map(a => animCard(c, a, false)).join('');
+  }
+  $('listBody').innerHTML = html;
+  $('listBody').querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { sfx.click(); renderAnimations(b.dataset.tab); }));
+  $('listBody').querySelectorAll('[data-eq]').forEach(b => b.addEventListener('click', () => { sfx.click(); C.equipAnim(c, b.dataset.eq); C.saveCareer(c); renderAnimations(); }));
+  $('listBody').querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => {
+    const a = animFor(b.dataset.buy);
+    confirmModal(`Buy ${a.name} for ${a.vc.toLocaleString()} VC?`, () => { if (C.buyAnim(c, a.id)) { C.equipAnim(c, a.id); C.saveCareer(c); sfx.green(); } renderAnimations(); });
+  }));
   if (screenStack[screenStack.length - 1] !== 'scrList') show('scrList');
+}
+// Tell the player about newly unlocked animations
+function announceUnlocks(list) {
+  if (!list || !list.length) return;
+  const names = list.map(a => a.name).join(', ');
+  toastMenu(`NEW ANIMATION${list.length > 1 ? 'S' : ''} UNLOCKED: ${names}`, 'Tap to open the Animations page', 'var(--green)', () => renderAnimations('recent'));
 }
 
 function renderSettings() {
@@ -570,7 +710,7 @@ function startMatch(info) {
   game = new Game({
     teams: info.teams, rosters: info.rosters, userTeam: info.userTeam, userSlot: info.slot,
     qLen: settings.qLen, difficulty: settings.difficulty, benchStart: info.benchStart, boost: info.boost,
-    dribbleStyle: P.dribble, jumpshot: P.jumpshot, playstyle: P.style, defAssist: settings.defAssist, passBias: info.passBias, badges: info.badges, greenBoost: info.greenBoost,
+    ...C.animOpts(career), playstyle: P.style, defAssist: settings.defAssist, passBias: info.passBias, badges: info.badges, greenBoost: info.greenBoost,
     onEvent: onGameEvent,
   });
   game.homeIdx = info.teams.indexOf(info.homeTeam);
@@ -596,6 +736,7 @@ function startMatch(info) {
   if (game.phase !== 'bench') {
     overlay(`<div class="ov-card"><div class="ng-label">${esc(info.label)}</div><h1>${esc(info.myTeam.name)} vs ${esc(info.opp.name)}</h1>
       ${info.boost ? `<p>G League Boost: +${info.boost} to all attributes this game</p>` : ''}
+      ${tasksHTML(C.gameTasks(career, settings))}
       <div class="ov-btns"><button class="btn ghost" id="ovHelp">CONTROLS</button><button class="btn primary" id="ovTip">TIP OFF</button></div></div>`);
     const prePhase = game.phase;
     game.phase = 'pregame';
@@ -638,6 +779,7 @@ $('btnPause').onclick = () => {
   if (!game || paused || game.phase === 'over') return;
   paused = true;
   overlay(`<div class="ov-card"><h1>PAUSED</h1><p>${game.score[0]} - ${game.score[1]} · Q${game.quarter}</p>
+    ${tasksHTML(C.gameTasks(career, settings), game.user.stats, { greens: game.badgeCounts.greenMachine || 0, gradeScore: game.grade, win: game.score[game.userTeam] > game.score[1 - game.userTeam] })}
     <div class="ov-btns"><button class="btn" id="pHelp">CONTROLS</button><button class="btn" id="pEdit">MOVE BUTTONS</button><button class="btn" id="pSet">SETTINGS</button><button class="btn danger" id="pQuit">SIM TO END</button><button class="btn primary" id="pRes">RESUME</button></div></div>`);
   const resume = () => { paused = false; overlay(null); last = performance.now(); };
   $('pRes').onclick = resume;
@@ -797,16 +939,17 @@ function finishMatch(info, res, g) {
   $('postBody').innerHTML = `
     <div class="post-grade"><div class="res" style="color:${out.win ? 'var(--green)' : 'var(--red)'}">${out.win ? 'WIN' : 'LOSS'} ${res.myScore}-${res.oppScore}</div>
       <div class="ng-label">TEAMMATE GRADE</div><div class="big" style="color:${col}">${out.letter}</div>
-      <div class="ap">+${out.ap} AP</div>${res.simmed ? '<small style="color:var(--dim)">Simulated</small>' : ''}</div>
+      <div class="ap">+${out.ap} AP</div><div class="vc">+${out.vc.toLocaleString()} VC</div>${res.simmed ? '<small style="color:var(--dim)">Simulated</small>' : ''}</div>
     <div>
       <div class="ng-label">${esc(info.label)} · vs ${esc(info.opp.name)}</div>
       <div class="statline"><div><b>${s.pts}</b><small>PTS</small></div><div><b>${s.reb}</b><small>REB</small></div><div><b>${s.ast}</b><small>AST</small></div><div><b>${s.stl}</b><small>STL</small></div><div><b>${s.blk}</b><small>BLK</small></div><div><b>${s.fgm}/${s.fga}</b><small>FG</small></div></div>
-      <div class="notes">${out.badgeUps.map(u => `<div class="badge-up" style="border-left-color:${BADGE_COLORS[u.tier - 1]}">${badgeChip(u.key, u.tier)} NEW BADGE: ${BADGES[u.key].name} (${BADGE_TIERS[u.tier - 1]})</div>`).join('')}${out.boosts.map(b => `<div class="boost">Skill boost: ${esc(b)}</div>`).join('')}${out.notes.map(n => `<div>${esc(n)}</div>`).join('')}</div>
+      ${out.tasks.length ? tasksHTML(out.tasks.map(t => ({ ...t, id: 'pts' })), null, null, out.tasks) : ''}
+      <div class="notes">${out.newAnims.map(a => `<div class="badge-up" style="border-left-color:var(--green)">NEW ANIMATION UNLOCKED: ${esc(a.name)} · equip it on the Animations page</div>`).join('')}${out.badgeUps.map(u => `<div class="badge-up" style="border-left-color:${BADGE_COLORS[u.tier - 1]}">${badgeChip(u.key, u.tier)} NEW BADGE: ${BADGES[u.key].name} (${BADGE_TIERS[u.tier - 1]})</div>`).join('')}${out.boosts.map(b => `<div class="boost">Skill boost: ${esc(b)}</div>`).join('')}${out.notes.map(n => `<div>${esc(n)}</div>`).join('')}</div>
       ${box}
       <div class="ov-btns" style="justify-content:flex-start"><button class="btn primary" id="postGo">CONTINUE</button></div>
     </div>`;
   show('scrPost', false);
-  $('postGo').onclick = () => { sfx.click(); goCareer(); };
+  $('postGo').onclick = () => { sfx.click(); goCareer(); if (out.newAnims.length) announceUnlocks(out.newAnims); };
 }
 
 // ---------------- Loop ----------------

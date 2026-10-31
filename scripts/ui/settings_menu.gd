@@ -249,7 +249,7 @@ func _build_gameplay() -> void:
 	_row(p, "Quarter length", _slider("gameplay", "quarter_minutes", 1, 12, 1, "%d min", 1.0))
 	_row(p, "Difficulty", _options("gameplay", "difficulty",
 		["Rookie", "Pro", "All-Star", "Superstar", "Hall of Fame"],
-		["rookie", "pro", "all_star", "superstar", "hall_of_fame"]), "Used by the AI from Phase 4.")
+		["rookie", "pro", "all_star", "superstar", "hall_of_fame"]), "CPU shooting, defense and decisions, and your shot window.")
 	_row(p, "Shot meter", _options("gameplay", "meter_style", ["Arc", "Bar", "Off"], ["arc", "bar", "off"]),
 		"Hold Shoot and let go at the top of the jump. Off hides the meter (timing still counts).")
 	_row(p, "Real player %", _toggle("gameplay", "real_player_pct"), "Shot success from ratings only, no timing.")

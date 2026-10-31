@@ -6,7 +6,7 @@ const USED_BY_GAME := ["idle_athletic", "jog", "sprint", "strafe_l", "strafe_r",
 	"jumpshot", "layup", "floater", "dunk", "chest_pass", "bounce_pass", "catch", "rebound", "block",
 	"contest", "steal", "bump_l", "bump_r", "bump_front", "celebrate", "crossover_rl", "crossover_lr",
 	"between_legs_rl", "between_legs_lr", "behind_back_rl", "behind_back_lr", "spin_r", "spin_l",
-	"hesitation", "stepback", "triple_threat"]
+	"hesitation", "stepback", "triple_threat", "free_throw", "set_screen"]
 
 var avatar: PlayerAvatar
 

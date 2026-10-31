@@ -40,7 +40,7 @@ differently signed build, uninstall first (`adb uninstall com.courtside.game`).
 
 ---
 
-## What to test (Phases 0–3)
+## What to test (Phases 0–4)
 
 | Area | How |
 |---|---|
@@ -61,6 +61,11 @@ differently signed build, uninstall first (`adb uninstall com.courtside.game`).
 | Ball physics | Shots, passes and loose balls are physical: rim and backboard bounces, swishes, bank shots, long rebounds, deflections, out of bounds. Whoever reaches the ball gets it. |
 | Movement | Momentum: sprinting players can't cut on a dime. Stamina drains while sprinting (the ring under your player turns red), which slows you and shrinks your shot window. Driving into a defender causes contact: you slow down and your shot is more contested. |
 | Touch layout | Settings → Controls → **EDIT TOUCH LAYOUT**: drag any button anywhere; RESET restores the defaults. |
+| Full games | Jump ball, inbounds, transition and the half-court game for 4 quarters (+ OT). Rules: 24-second shot clock, 8 seconds, over-and-back, offensive 3 seconds, out of bounds, goaltending, shooting / reach / blocking fouls, charges, and-ones, bonus free throws, 6 fouls and you're out. Quarter length and difficulty in Settings → Gameplay. |
+| Free throws | Your team's free throws use the meter: press SHOOT (or rest a finger in the swipe zone) to start, let go at the top. |
+| Team AI | Both teams run pick-and-roll, isolation, post-ups, motion and fast breaks, and defend in man, switch or a 2-3 zone with help and box-outs. Ratings drive shots, passes, steals, blocks, rebounds and fouls. |
+| Pause menu | Timeout (7 per team; the CPU also calls them to stop runs), Substitutions (or auto), Play call (Auto / Pick & Roll / Isolation / Post Up / Motion), Defense (Man / Switch / Zone), Box score, Play-by-play. |
+| Final | Final screen with the score, player of the game and box score; Play again / Main menu. Wins and games played are saved to your profile. |
 | Player Lab | **PLAY NOW → PLAYER LAB**: any player from any team, every animation, turntable, playback speed. |
 
 ---
@@ -81,7 +86,8 @@ scripts/core/    CourtSpec (regulation dimensions), GameState (clocks, fouls, sc
 scripts/arena/   CourtBuilder, ArenaBuilder, MeshKit
 scripts/camera/  CameraDirector (presets, intro, replay cams), ReplayRecorder
 scripts/hud/     BroadcastHUD
-scripts/game/    arena scene, demo scrimmage, CourtPlayer (movement + avatar)
+scripts/game/    arena scene, GameSim (game flow + rules), CourtPlayer (movement + avatar)
+scripts/sim/     Referee, Rotation, BoxScore, TeamAI, Difficulty
 scripts/player/  PlayerAvatar (model, body sliders, uniform), AvatarAnimator (AnimationTree, ball, IK), AnimLibrary
 scripts/dev/     Player Lab
 assets/players/  player.glb (built by tools/blender/build_player.py) + extracted hair textures

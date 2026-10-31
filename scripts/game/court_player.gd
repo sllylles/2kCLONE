@@ -10,7 +10,8 @@ const ACCEL := 30.0            # ft/s²
 const TURN_RATE := 9.0         # rad/s
 ## Actions that pin the player in place (shots keep a little drift).
 const ROOTED := ["jumpshot", "floater", "dunk", "rebound", "block", "contest", "chest_pass", "bounce_pass",
-	"catch", "celebrate", "bump_l", "bump_r", "bump_front", "stepback", "hesitation", "steal"]
+	"catch", "celebrate", "bump_l", "bump_r", "bump_front", "stepback", "hesitation", "steal", "free_throw",
+	"set_screen"]
 
 var data: Dictionary = {}
 var team_idx := 0
@@ -27,6 +28,11 @@ var has_ball := false
 var push := Vector3.ZERO
 ## 1 = fresh, 0 = exhausted. Affects speed and the shot meter window.
 var stamina := 1.0
+## Fatigue speed: the game scales this with quarter length so rotations look
+## like a real game's even with short quarters.
+var drain_scale := 1.0
+## Caps speed (post players backing down, walking into position).
+var max_speed_cap := INF
 
 var avatar: PlayerAvatar
 var anim: AvatarAnimator
@@ -54,6 +60,18 @@ func setup(player: Dictionary, team: Dictionary, home_colors: bool) -> void:
 	_ring.layers = 4
 	_ring.visible = false
 	add_child(_ring)
+
+
+func pid() -> String:
+	return str(data.get("id", ""))
+
+
+func rating(key: String, fallback := 70.0) -> float:
+	return float(data.get("ratings", {}).get(key, fallback))
+
+
+func short_name() -> String:
+	return str(data.get("last", "?"))
 
 
 func pos_ft() -> Vector3:
@@ -109,7 +127,7 @@ func step(delta: float) -> void:
 	var desired := Vector3.ZERO
 	# Faster players run faster; tired players run slower.
 	var pace := lerpf(0.9, 1.08, clampf((_speed_rating() - 50.0) / 49.0, 0.0, 1.0)) * lerpf(0.8, 1.0, stamina)
-	var max_speed := (SPRINT_SPEED if sprinting and stamina > 0.05 else JOG_SPEED) * pace
+	var max_speed := minf((SPRINT_SPEED if sprinting and stamina > 0.05 else JOG_SPEED) * pace, max_speed_cap)
 	if user_controlled:
 		desired = manual_input * max_speed
 	else:
@@ -151,12 +169,13 @@ func step(delta: float) -> void:
 		rotation.y = rotate_toward(rotation.y, want, TURN_RATE * delta)
 	# Stamina: sprinting drains it, standing around gives it back.
 	var spd := velocity.length()
+	var endurance := lerpf(1.3, 0.7, clampf((float(data.get("ratings", {}).get("stamina", 75)) - 50.0) / 49.0, 0.0, 1.0))
 	if spd > JOG_SPEED * 1.1:
-		stamina -= 0.065 * delta
+		stamina -= 0.05 * delta * drain_scale * endurance
 	elif spd > 4.0:
-		stamina -= 0.012 * delta
+		stamina -= 0.012 * delta * drain_scale * endurance
 	else:
-		stamina += 0.05 * delta
+		stamina += 0.02 * delta
 	stamina = clampf(stamina, 0.0, 1.0)
 	if _ring.visible:
 		(_ring.material_override as StandardMaterial3D).albedo_color = \

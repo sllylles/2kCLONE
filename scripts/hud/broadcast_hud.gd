@@ -253,6 +253,29 @@ func _build_toast() -> void:
 	_root.add_child(_toast)
 
 
+var _ticker: Label
+var _ticker_tween: Tween
+
+
+## The latest play, under the scorebug's top edge (broadcast lower third).
+func ticker(text: String) -> void:
+	if _ticker == null:
+		_ticker = _lbl("", 22, Color.WHITE, 700, false)
+		_place(_ticker, Vector2(0.5, 1), Rect2(-500, -BUG_H - 92, 1000, 40))
+		_ticker.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+		_ticker.add_theme_constant_override("outline_size", 8)
+		_root.add_child(_ticker)
+	if text.begins_with("SUB:"):
+		return
+	_ticker.text = text
+	if _ticker_tween:
+		_ticker_tween.kill()
+	_ticker.modulate.a = 1.0
+	_ticker_tween = create_tween()
+	_ticker_tween.tween_interval(3.5)
+	_ticker_tween.tween_property(_ticker, "modulate:a", 0.0, 0.5)
+
+
 func toast(text: String, color := Color.WHITE) -> void:
 	_toast.text = text
 	_toast.add_theme_color_override("font_color", color)

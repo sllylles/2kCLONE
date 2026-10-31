@@ -1,6 +1,6 @@
 extends Node3D
-## Phase 1 game scene: builds the arena for the chosen matchup, runs the
-## pre-game flyover, then the demo scrimmage with live cameras, replays and
+## Game scene: builds the arena for the chosen matchup, runs the
+## pre-game flyover, then a full game (GameSim) with live cameras, replays and
 ## the broadcast HUD. Also hosts the pause menu.
 
 var home: Dictionary
@@ -11,7 +11,7 @@ var court: CourtBuilder
 var arena: ArenaBuilder
 var director: CameraDirector
 var recorder: ReplayRecorder
-var sim: DemoScrimmage
+var sim: GameSim
 var hud: BroadcastHUD
 var touch: TouchControls
 var pause_menu: Control
@@ -47,7 +47,7 @@ func _ready() -> void:
 	director.name = "Cameras"
 	add_child(director)
 
-	sim = DemoScrimmage.new()
+	sim = GameSim.new()
 	sim.name = "Scrimmage"
 	add_child(sim)
 	sim.camera = director.camera
@@ -78,8 +78,6 @@ func _ready() -> void:
 		c.process_mode = Node.PROCESS_MODE_PAUSABLE
 	_build_pause_menu()
 
-	state.shot_clock_expired.connect(func(_t): sim.on_shot_clock_violation())
-	state.period_ended.connect(sim.on_period_ended)
 	sim.shot_made.connect(_on_shot_made)
 	sim.shot_missed.connect(func(_t): _excitement = maxf(_excitement, 0.45))
 	sim.handler_changed.connect(_on_handler_changed)
@@ -92,6 +90,9 @@ func _ready() -> void:
 	sim.meter_graded.connect(meter.show_grade)
 	director.preset_changed.connect(func(_id, n): hud.show_camera_name(n))
 	director.intro_finished.connect(_on_intro_finished)
+	sim.play_logged.connect(hud.ticker)
+	sim.game_over.connect(_on_game_over)
+	sim.timeout_called.connect(func(_t): _excitement = 0.2)
 	_on_possession_changed(state.possession)
 
 	if Settings.get_value("camera", "intro_flyover"):
@@ -239,37 +240,93 @@ func _build_pause_menu() -> void:
 	panel.custom_minimum_size.x = 520
 	row.add_child(panel)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 14)
+	v.add_theme_constant_override("separation", 12)
 	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	panel.add_child(v)
-	v.add_child(UIKit.label("PAUSED", 60, 900, UIKit.TEXT, true))
-	v.add_child(UIKit.label("%s @ %s" % [away.abbr, home.abbr], 26, 700, UIKit.TEXT_DIM))
-	var cam_panel := _build_camera_panel()
-	row.add_child(cam_panel)
+	v.add_child(UIKit.label("PAUSED", 56, 900, UIKit.TEXT, true))
+	var score_l := UIKit.label("", 24, 700, UIKit.TEXT_DIM)
+	v.add_child(score_l)
+	# One detail panel at a time on the right.
+	var panels := {
+		"camera": _build_camera_panel(),
+		"box": GamePanels.box_score(sim),
+		"pbp": GamePanels.play_by_play(sim),
+		"subs": GamePanels.substitutions(sim),
+	}
+	for k in panels:
+		var pc: Control = panels[k]
+		pc.visible = false
+		pc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(pc)
+	var show_panel := func(key: String):
+		for k in panels:
+			var pc: Control = panels[k]
+			pc.visible = k == key and not pc.visible
+			if pc.visible and pc.has_meta("refresh"):
+				(pc.get_meta("refresh") as Callable).call()
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	v.add_child(grid)
+	var ut := sim.user_team
+	var timeout_b := UIKit.button("", Vector2(240, 62))
+	var play_b := UIKit.button("", Vector2(240, 62))
+	var def_b := UIKit.button("", Vector2(240, 62))
+	var labels := func():
+		timeout_b.text = "TIMEOUT (%d)" % state.timeouts[ut]
+		timeout_b.disabled = not sim.can_call_timeout(ut)
+		play_b.text = "PLAY: %s" % TeamAI.PLAY_NAMES[sim.ai[ut].play_call].to_upper()
+		def_b.text = "DEFENSE: %s" % sim.ai[ut].scheme.to_upper()
+		score_l.text = "%s %d  @  %s %d   •   %s %s" % [away.abbr, state.scores[GameState.AWAY], home.abbr,
+			state.scores[GameState.HOME], state.period_label(), GameState.format_clock(state.game_clock)]
+	timeout_b.pressed.connect(func():
+		if sim.call_timeout(ut):
+			toggle_pause())
+	play_b.pressed.connect(func():
+		var opts := ["auto"] + TeamAI.PLAYS
+		sim.ai[ut].play_call = opts[(opts.find(sim.ai[ut].play_call) + 1) % opts.size()]
+		sim.ai[ut].play = {}
+		labels.call())
+	def_b.pressed.connect(func():
+		sim.ai[ut].scheme = TeamAI.SCHEMES[(TeamAI.SCHEMES.find(sim.ai[ut].scheme) + 1) % TeamAI.SCHEMES.size()]
+		labels.call())
 	var items := [
 		["RESUME", toggle_pause],
-		["CAMERA", func(): cam_panel.visible = not cam_panel.visible],
+		[timeout_b, null],
+		["SUBSTITUTIONS", func(): show_panel.call("subs")],
+		[play_b, null],
+		[def_b, null],
+		["BOX SCORE", func(): show_panel.call("box")],
+		["PLAY-BY-PLAY", func(): show_panel.call("pbp")],
+		["CAMERA", func(): show_panel.call("camera")],
 		["INSTANT REPLAY", func():
 			toggle_pause()
 			start_replay()],
+		["SETTINGS", func(): SceneManager.open_overlay("settings")],
 		["REPLAY INTRO", func():
 			toggle_pause()
 			sim.paused = true
 			state.running = false
 			director.start_intro()
 			hud.show_matchup(true)],
-		["SETTINGS", func(): SceneManager.open_overlay("settings")],
 		["QUIT TO MENU", _quit],
 	]
 	var first: Button = null
 	for it in items:
-		var b := UIKit.button(it[0], Vector2(460, 74))
-		b.pressed.connect(it[1])
-		v.add_child(b)
+		var b: Button
+		if it[0] is Button:
+			b = it[0]
+		else:
+			b = UIKit.button(it[0], Vector2(240, 62))
+			b.pressed.connect(it[1])
+		b.add_theme_font_size_override("font_size", 21)
+		grid.add_child(b)
 		if first == null:
 			first = b
 	pause_menu.set_meta("first", first)
-	pause_menu.set_meta("camera_panel", cam_panel)
+	pause_menu.set_meta("panels", panels)
+	pause_menu.set_meta("labels", labels)
 
 
 ## Pick any camera angle and set its zoom/height; changes apply live.
@@ -333,8 +390,30 @@ func toggle_pause() -> void:
 	touch.visible = not on and InputRouter.touch_controls_visible()
 	if on:
 		touch.release_all()
-		(pause_menu.get_meta("camera_panel") as Control).visible = false
+		for pc in (pause_menu.get_meta("panels") as Dictionary).values():
+			(pc as Control).visible = false
+		(pause_menu.get_meta("labels") as Callable).call()
 		(pause_menu.get_meta("first") as Button).grab_focus()
+
+
+## Final buzzer: record the result and show the final screen.
+func _on_game_over(winner: int) -> void:
+	if SaveSystem.active_slot >= 0:
+		var stats: Dictionary = SaveSystem.data.get("stats", {})
+		stats["games_played"] = int(stats.get("games_played", 0)) + 1
+		if winner == sim.user_team:
+			stats["wins"] = int(stats.get("wins", 0)) + 1
+		SaveSystem.data["stats"] = stats
+		SaveSystem.save_active()
+	_excitement = 1.0 if winner == sim.user_team else 0.3
+	touch.visible = false
+	var layer := CanvasLayer.new()
+	layer.layer = 60
+	layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(layer)
+	var params := SceneManager.params.duplicate()
+	layer.add_child(GamePanels.final_screen(sim, winner,
+		func(): SceneManager.goto("arena", params, false), _quit))
 
 
 func _quit() -> void:

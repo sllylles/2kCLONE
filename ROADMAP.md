@@ -2,7 +2,7 @@
 
 Single source of truth for status. Updated at the end of every phase.
 
-**Current build:** v0.4.0, Phases 0–3 done (real rosters, animated players, shot meter, ball physics). **Waiting for device testing before Phase 4.**
+**Current build:** v0.5.0, Phases 0–4 done (real rosters, animated players, shot meter, ball physics, full games with rules and team AI). **Waiting for device testing before Phase 5.**
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -10,8 +10,8 @@ Single source of truth for status. Updated at the end of every phase.
 | 1 | Arena & cameras | ✅ Done (placeholder players) |
 | 2 | Players & animation | ✅ Done |
 | 3 | Controls & gameplay feel | ✅ Done |
-| 4 | Game simulation & AI | ⏭ Next |
-| 5 | Play Now hub | Planned |
+| 4 | Game simulation & AI | ✅ Done |
+| 5 | Play Now hub | ⏭ Next |
 | 6 | MyPlayer builder | Planned |
 | 7 | Career mode | Planned |
 | 8 | Polish | Planned |
@@ -115,10 +115,29 @@ See README, "What to test". Things worth checking on the Pixel 10 Pro:
 - The ball doesn't collide with players' bodies (only hands that reach it); blocks still decide outcomes through the block roll.
 - Team AI is still the simple demo offense. Real plays and defense are Phase 4.
 
-## Phase 4: Game simulation & AI
-- [ ] Full rules: 24 s / 8 s / 3 s, fouls and free throws, bonus, goaltending, out of bounds, timeouts
-- [ ] Difficulty Rookie → Hall of Fame; team AI plays (PnR, iso, motion, post), defenses (man, zone, help, switch)
-- [ ] Substitutions, fatigue, box score, play-by-play, player of the game
+## Phase 4: Game simulation & AI ✅
+- [x] `GameSim` replaces the demo scrimmage: jump ball, inbounds (baseline after scores, sideline after violations/fouls/timeouts), full-court transition, live play, free throws, dead balls, quarters/halftime/OT, buzzer beaters, final
+- [x] Rules (`Referee`): 24-second shot clock (14 on offensive rebounds, kept on defensive fouls), 8 seconds, over-and-back, offensive 3 seconds, out of bounds with last touch, goaltending, shooting / reach / blocking fouls and charges, and-ones, team fouls and bonus, 6-foul disqualification
+- [x] Free throws: lane line-up, your team's free throws use the meter, AI by rating; live rebound on the last miss
+- [x] Timeouts: 7 per team; yours from the pause menu; the CPU calls one to stop an 8-0 run
+- [x] Team AI (`TeamAI`): pick-and-roll (screen, roll, reads), isolation (clear-out, moves, drive or pull-up), post-up (entry, back-down, hook, kick-out on double teams), motion (ball reversal, backdoor cuts), fast breaks; shot selection from shot value, shot clock and IQ; never camps in the lane
+- [x] Defense: man with help and rotations, switching on screens, 2-3 zone, box-outs, backcourt retreat; CPU steal/block pressure by difficulty
+- [x] Substitutions and fatigue (`Rotation`): stamina by rating, tired/foul-trouble/fouled-out subs at dead balls, rested starters return, minimum stints; manual subs from the pause menu; play calls and defensive scheme for your team
+- [x] Difficulty Rookie → Hall of Fame: CPU make rates, defense and IQ, foul calls, and your meter window
+- [x] Box score (MIN, PTS, REB, AST, STL, BLK, FG, 3PT, FT, TO, PF, +/-), play-by-play, HUD ticker, player of the game, final screen; wins/games saved to the profile
+- [x] Tests: 89 passing (adds box score, referee, rotation)
+
+### How to test Phase 4
+1. Quick Game with the default 5-minute quarters, or set 1-2 minutes in Settings → Gameplay to see a full game quickly.
+2. Pause → Box score / Play-by-play during the game; check the stats match what you saw.
+3. Try Pause → Play call (Pick & Roll, Post Up…) and Defense (Zone, Switch) and watch your teammates.
+4. Get fouled on a drive or a jumper → free throws with the meter.
+5. Try difficulty Rookie vs Hall of Fame.
+
+### Known limitations
+- Defensive 3 seconds, 5-second inbounds and jump balls on held balls aren't called.
+- No coach challenges, technicals or flagrant fouls.
+- Simulated (not played) games are Phase 5 (season/franchise).
 
 ## Phase 5: Play Now hub
 - [ ] Quick Game (uniforms, arena picker), Season, Playoffs, Franchise, Blacktop, All-Star events, Practice; local 2-player if feasible

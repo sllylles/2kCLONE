@@ -7,6 +7,7 @@ extends CanvasLayer
 const BUG_H := 64.0
 
 var state: GameState
+var _root: Control
 var home: Dictionary
 var away: Dictionary
 
@@ -37,6 +38,11 @@ func setup(game_state: GameState, home_team: Dictionary, away_team: Dictionary, 
 	home = home_team
 	away = away_team
 	layer = 10
+	# Everything sits inside the safe area (rounded corners, camera cutout).
+	_root = Control.new()
+	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_root)
+	UIKit.fit_safe_area(_root)
 	_build_scorebug()
 	_build_name_card()
 	_build_toast()
@@ -85,7 +91,7 @@ func _build_scorebug() -> void:
 	_bug = Control.new()
 	_bug.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	_bug.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_bug)
+	_root.add_child(_bug)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 0)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -195,7 +201,7 @@ func set_scorebug_visible(on: bool) -> void:
 func _build_name_card() -> void:
 	_card = _panel(Color(0.06, 0.07, 0.1, 0.92), 4)
 	_place(_card, Vector2(0, 0), Rect2(-700, 110, 0, 0))
-	add_child(_card)
+	_root.add_child(_card)
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 16)
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -244,7 +250,7 @@ func _build_toast() -> void:
 	_toast.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	_toast.add_theme_constant_override("outline_size", 12)
 	_toast.modulate.a = 0.0
-	add_child(_toast)
+	_root.add_child(_toast)
 
 
 func toast(text: String, color := Color.WHITE) -> void:
@@ -264,7 +270,7 @@ func _build_camera_chip() -> void:
 	_place(_camera_chip, Vector2(1, 0), Rect2(-520, 24, 480, 40))
 	_camera_chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_camera_chip.modulate.a = 0.0
-	add_child(_camera_chip)
+	_root.add_child(_camera_chip)
 
 
 func show_camera_name(text: String) -> void:
@@ -281,7 +287,7 @@ func _build_replay_bug() -> void:
 	var l := _lbl("REPLAY", 34)
 	_replay_bug.add_child(l)
 	_replay_bug.visible = false
-	add_child(_replay_bug)
+	_root.add_child(_replay_bug)
 
 
 func set_replay(on: bool) -> void:
@@ -299,7 +305,7 @@ func _build_matchup(arena_name: String) -> void:
 	_matchup.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_matchup.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_matchup.visible = false
-	add_child(_matchup)
+	_root.add_child(_matchup)
 	var center := VBoxContainer.new()
 	_place(center, Vector2(0.5, 1), Rect2(-560, -330, 1120, 260))
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE

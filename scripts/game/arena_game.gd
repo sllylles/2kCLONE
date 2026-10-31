@@ -221,19 +221,28 @@ func _build_pause_menu() -> void:
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.6)
 	pause_menu.add_child(UIKit.full_rect(dim))
-	var panel := UIKit.panel(Color(0.07, 0.08, 0.11, 0.97), 0)
-	panel.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	panel.custom_minimum_size.x = 560
-	pause_menu.add_child(panel)
+	var safe := Control.new()
+	safe.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pause_menu.add_child(safe)
+	UIKit.fit_safe_area(safe)
+	var row := HBoxContainer.new()
+	UIKit.full_rect(row)
+	row.add_theme_constant_override("separation", 30)
+	safe.add_child(row)
+	var panel := UIKit.panel(Color(0.07, 0.08, 0.11, 0.97), 8)
+	panel.custom_minimum_size.x = 520
+	row.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 14)
 	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	panel.add_child(v)
 	v.add_child(UIKit.label("PAUSED", 60, 900, UIKit.TEXT, true))
 	v.add_child(UIKit.label("%s @ %s" % [away.abbr, home.abbr], 26, 700, UIKit.TEXT_DIM))
+	var cam_panel := _build_camera_panel()
+	row.add_child(cam_panel)
 	var items := [
 		["RESUME", toggle_pause],
-		["CHANGE CAMERA", func(): director.cycle_preset()],
+		["CAMERA", func(): cam_panel.visible = not cam_panel.visible],
 		["INSTANT REPLAY", func():
 			toggle_pause()
 			start_replay()],
@@ -248,12 +257,65 @@ func _build_pause_menu() -> void:
 	]
 	var first: Button = null
 	for it in items:
-		var b := UIKit.button(it[0], Vector2(460, 76))
+		var b := UIKit.button(it[0], Vector2(460, 74))
 		b.pressed.connect(it[1])
 		v.add_child(b)
 		if first == null:
 			first = b
 	pause_menu.set_meta("first", first)
+	pause_menu.set_meta("camera_panel", cam_panel)
+
+
+## Pick any camera angle and set its zoom/height; changes apply live.
+func _build_camera_panel() -> Control:
+	var p := UIKit.panel(Color(0.07, 0.08, 0.11, 0.97), 8)
+	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	p.custom_minimum_size.x = 640
+	p.visible = false
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	p.add_child(v)
+	v.add_child(UIKit.label("CAMERA", 40, 900, UIKit.TEXT, true))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 12)
+	v.add_child(grid)
+	var buttons := {}
+	var zoom := HSlider.new()
+	var height := HSlider.new()
+	var sync := func():
+		var cur := str(Settings.get_value("camera", "preset"))
+		for id in buttons:
+			buttons[id].button_pressed = id == cur
+		var sl := Settings.get_camera_sliders(cur)
+		zoom.set_value_no_signal(sl.zoom)
+		height.set_value_no_signal(sl.height)
+	for c in DataDB.camera_presets:
+		var b := UIKit.button(str(c.name).to_upper(), Vector2(290, 66))
+		b.toggle_mode = true
+		b.pressed.connect(func():
+			Settings.set_value("camera", "preset", c.id)
+			sync.call())
+		grid.add_child(b)
+		buttons[c.id] = b
+	for pair in [["ZOOM", zoom], ["HEIGHT", height]]:
+		var h := HBoxContainer.new()
+		var l := UIKit.label(pair[0], 24, 800, UIKit.TEXT_DIM)
+		l.custom_minimum_size.x = 130
+		h.add_child(l)
+		var s: HSlider = pair[1]
+		s.min_value = 0
+		s.max_value = 10
+		s.step = 1
+		s.custom_minimum_size = Vector2(440, 56)
+		s.value_changed.connect(func(_x):
+			Settings.set_camera_sliders(str(Settings.get_value("camera", "preset")), zoom.value, height.value))
+		h.add_child(s)
+		v.add_child(h)
+	p.visibility_changed.connect(sync)
+	sync.call()
+	return p
 
 
 func toggle_pause() -> void:
@@ -265,6 +327,7 @@ func toggle_pause() -> void:
 	touch.visible = not on and InputRouter.touch_controls_visible()
 	if on:
 		touch.release_all()
+		(pause_menu.get_meta("camera_panel") as Control).visible = false
 		(pause_menu.get_meta("first") as Button).grab_focus()
 
 

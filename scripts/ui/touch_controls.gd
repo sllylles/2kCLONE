@@ -36,9 +36,8 @@ func _ready() -> void:
 		{"id": "pass", "action": "pass", "def_action": "steal", "label": "PASS", "def_label": "STEAL", "r": 76.0, "hold": false},
 		{"id": "sprint", "action": "sprint", "def_action": "sprint", "label": "SPRINT", "def_label": "SPRINT", "r": 70.0, "hold": true},
 		{"id": "switch", "action": "", "def_action": "switch", "label": "", "def_label": "SWITCH", "r": 58.0, "hold": false},
-		{"id": "camera", "action": "camera_next", "def_action": "camera_next", "label": "CAM", "def_label": "CAM", "r": 40.0, "hold": false, "top": true},
-		{"id": "replay", "action": "replay", "def_action": "replay", "label": "REPLAY", "def_label": "REPLAY", "r": 40.0, "hold": false, "top": true},
-		{"id": "pause", "action": "pause", "def_action": "pause", "label": "II", "def_label": "II", "r": 40.0, "hold": false, "top": true},
+		# Camera and replay live in the pause menu (controllers keep their shortcuts).
+		{"id": "pause", "action": "pause", "def_action": "pause", "label": "II", "def_label": "II", "r": 44.0, "hold": false, "top": true},
 	]
 	for b in _buttons:
 		b["touch"] = -1
@@ -82,16 +81,17 @@ func release_all() -> void:
 
 func _layout() -> void:
 	var s := get_viewport_rect().size
+	# Defaults hug the safe area so nothing hides under rounded corners.
+	var sr := UIKit.safe_rect(get_viewport())
 	var k := _scale
-	var by := s.y - 40.0
+	var rx := sr.end.x
+	var by := sr.end.y - 10.0
 	var positions := {
-		"shoot": Vector2(s.x - 150.0 * k, by - 130.0 * k),
-		"pass": Vector2(s.x - 350.0 * k, by - 70.0 * k),
-		"sprint": Vector2(s.x - 330.0 * k, by - 270.0 * k),
-		"switch": Vector2(s.x - 140.0 * k, by - 330.0 * k),
-		"camera": Vector2(s.x - 290.0, 70.0),
-		"replay": Vector2(s.x - 190.0, 70.0),
-		"pause": Vector2(s.x - 80.0, 70.0),
+		"shoot": Vector2(rx - 120.0 * k, by - 120.0 * k),
+		"pass": Vector2(rx - 320.0 * k, by - 60.0 * k),
+		"sprint": Vector2(rx - 300.0 * k, by - 260.0 * k),
+		"switch": Vector2(rx - 110.0 * k, by - 320.0 * k),
+		"pause": Vector2(rx - 40.0, sr.position.y + 44.0),
 	}
 	var custom: Dictionary = Settings.get_value("controls", "layout")
 	for b in _buttons:
@@ -117,8 +117,9 @@ func reset_layout() -> void:
 
 
 func _pro_zone() -> Rect2:
+	var sr := UIKit.safe_rect(get_viewport())
 	var s := get_viewport_rect().size
-	return Rect2(s.x * 0.52, s.y * 0.16, s.x * 0.48 - 420.0 * _scale, s.y * 0.5)
+	return Rect2(s.x * 0.52, sr.position.y + 110.0, sr.end.x - s.x * 0.52 - 420.0 * _scale, s.y * 0.48)
 
 
 func _button_at(p: Vector2) -> Dictionary:
@@ -288,7 +289,8 @@ func _draw() -> void:
 		draw_arc(_stick_origin, r, 0, TAU, 48, Color(1, 1, 1, 0.5 * a), 3.0, true)
 		draw_circle(_stick_pos, r * 0.42, Color(1, 1, 1, 0.55 * a))
 	else:
-		var hint := Vector2(220, get_viewport_rect().size.y - 220) * Vector2(1, 1)
+		var sr := UIKit.safe_rect(get_viewport())
+		var hint := Vector2(sr.position.x + 170.0 * _scale, sr.end.y - 170.0 * _scale)
 		draw_arc(hint, STICK_RADIUS * _scale, 0, TAU, 48, Color(1, 1, 1, 0.18 * a), 2.0, true)
 		draw_string(font, hint + Vector2(-50, 8), "MOVE", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1, 0.3 * a))
 	# Buttons

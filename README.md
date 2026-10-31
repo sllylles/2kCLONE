@@ -50,11 +50,11 @@ differently signed build, uninstall first (`adb uninstall com.courtside.game`).
 | Debug overlay | Settings toggle, **three-finger tap**, or F3 on a keyboard: FPS, frame ms, draw calls, primitives, VRAM, 3D resolution. |
 | Quick Game | **PLAY NOW → QUICK GAME**, pick away/home, **TIP OFF**. |
 | Intro flyover | Plays before tip-off; tap to skip. |
-| Cameras | **CAM** button (or View on a controller, C on keyboard) cycles Broadcast, Elevated Sideline, Drive, Side Court, End Court, Skybox. Zoom/height per camera in Settings → Camera. |
-| Replays | **REPLAY** button (D-pad down / V) replays the last 5 s with cinematic angles; auto-replays on made threes. Tap to skip. |
+| Cameras | **Pause (II) → CAMERA**: pick Broadcast, Elevated Sideline, Drive, Side Court, End Court or Skybox and set its zoom/height. Controllers: View button cycles cameras; keyboard: C. |
+| Replays | **Pause (II) → INSTANT REPLAY** (D-pad down / V) replays the last 5 s with cinematic angles; auto-replays on made threes. Tap to skip. |
 | HUD | Scorebug with game/shot clock, period, fouls, timeouts, bonus, possession; player name cards; backboard shot clocks and the jumbotron mirror the score. |
 | Controls | Left half: floating stick. Right: SHOOT / PASS / SPRINT (BLOCK / STEAL / SWITCH on defense), swipe zone for the pro stick. Leave the controls for 3 s and the AI plays for you. Bluetooth controllers work with no setup (Xbox layout: X shoot, A pass, RT sprint). |
-| Pause | **II** button / Menu / Esc: resume, camera, replay, replay intro, settings, quit. |
+| Pause | **II** button (top right) / Menu / Esc: resume, camera, instant replay, replay intro, settings, quit. |
 | Players | Rigged players at their real height, weight and wingspan, in team uniforms with their numbers and the team name. Watch dribbling, jump shots, layups, floaters, dunks, passes and catches, rebounds, blocks, contests, steals, bumps and celebrations. |
 | Dribble moves | With the ball, swipe in the **pro stick zone** (or flick the right stick): toward your off hand = crossover (spin while sprinting), toward your ball hand = behind the back, down = stepback (between the legs while moving), up = hesitation (or a layup/dunk when you're driving at the rim). |
 | Shooting | **Hold SHOOT** (or rest a finger in the pro-stick zone / hold the right stick) and **let go at the top of the jump**. The meter beside the shooter fills toward the release point; the green band is your timing window, bigger for better shooters and open looks, smaller when contested, tired or off a stepback. You get a grade (Excellent, Good, Slightly Early/Late, Early/Late, Very Early/Late). Settings → Gameplay: meter Arc / Bar / Off, or **Real player %** (no timing; ratings only). |

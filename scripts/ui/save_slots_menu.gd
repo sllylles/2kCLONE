@@ -14,9 +14,9 @@ func _ready() -> void:
 	bg.color = UIKit.BG
 	add_child(UIKit.full_rect(bg))
 	var margin := MarginContainer.new()
-	UIKit.full_rect(margin)
+	UIKit.fit_safe_area(margin)
 	for s in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + s, 64)
+		margin.add_theme_constant_override("margin_" + s, 40)
 	add_child(margin)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 30)

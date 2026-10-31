@@ -42,14 +42,14 @@ func _ready() -> void:
 	theme = UIKit.theme()
 	_build_background()
 	var root := VBoxContainer.new()
-	UIKit.full_rect(root)
+	UIKit.fit_safe_area(root)
 	root.add_theme_constant_override("separation", 0)
 	add_child(root)
 	root.add_child(_build_top_bar())
 	var margin := MarginContainer.new()
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	for side in ["left", "right"]:
-		margin.add_theme_constant_override("margin_" + side, 72)
+		margin.add_theme_constant_override("margin_" + side, 40)
 	margin.add_theme_constant_override("margin_top", 40)
 	margin.add_theme_constant_override("margin_bottom", 40)
 	root.add_child(margin)

@@ -158,6 +158,53 @@ static func full_rect(c: Control) -> Control:
 	return c
 
 
+## Padding kept clear of rounded screen corners (canvas units).
+const CORNER_PAD := 34.0
+
+
+## The part of the screen that is safe to draw UI on, in canvas coordinates:
+## the device's safe area (camera cutout, rounded corners) plus padding.
+static func safe_rect(vp: Viewport) -> Rect2:
+	var visible := vp.get_visible_rect()
+	var r := visible
+	if OS.has_feature("mobile"):
+		var win := Vector2(DisplayServer.window_get_size())
+		var safe := DisplayServer.get_display_safe_area()
+		if win.x > 0 and safe.size.x > 0:
+			var k := visible.size / win
+			var sr := Rect2(Vector2(safe.position) * k, Vector2(safe.size) * k)
+			if sr.intersects(visible):
+				r = sr.intersection(visible)
+	return r.grow_individual(-CORNER_PAD, -CORNER_PAD * 0.5, -CORNER_PAD, -CORNER_PAD * 0.5)
+
+
+## Insets a full-rect Control to the safe area and keeps it there on resize.
+static func fit_safe_area(c: Control) -> Control:
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var apply := func():
+		if not is_instance_valid(c) or not c.is_inside_tree():
+			return
+		var vis := c.get_viewport().get_visible_rect()
+		var s := safe_rect(c.get_viewport())
+		c.offset_left = s.position.x - vis.position.x
+		c.offset_top = s.position.y - vis.position.y
+		c.offset_right = s.end.x - vis.end.x
+		c.offset_bottom = s.end.y - vis.end.y
+	var hook := func():
+		apply.call()
+		var vp := c.get_viewport()
+		if not vp.size_changed.is_connected(apply):
+			vp.size_changed.connect(apply)
+			c.tree_exiting.connect(func():
+				if vp.size_changed.is_connected(apply):
+					vp.size_changed.disconnect(apply), CONNECT_ONE_SHOT)
+	if c.is_inside_tree():
+		hook.call()
+	else:
+		c.tree_entered.connect(hook, CONNECT_ONE_SHOT)
+	return c
+
+
 ## A generated round team badge (used when a team has no logo PNG).
 static func team_badge(team: Dictionary, size := 256) -> Texture2D:
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)

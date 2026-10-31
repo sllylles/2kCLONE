@@ -16,9 +16,9 @@ func _ready() -> void:
 	dim.color = Color(0, 0, 0, 0.75)
 	add_child(UIKit.full_rect(dim))
 	var margin := MarginContainer.new()
-	UIKit.full_rect(margin)
+	UIKit.fit_safe_area(margin)
 	for s in ["left", "right"]:
-		margin.add_theme_constant_override("margin_" + s, 90)
+		margin.add_theme_constant_override("margin_" + s, 56)
 	for s in ["top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + s, 40)
 	add_child(margin)

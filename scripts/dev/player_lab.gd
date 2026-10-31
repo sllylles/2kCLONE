@@ -103,7 +103,7 @@ func _build_viewer() -> void:
 	add_child(ui)
 	var root := Control.new()
 	root.theme = UIKit.theme()
-	UIKit.full_rect(root)
+	UIKit.fit_safe_area(root)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(root)
 	var top := HBoxContainer.new()

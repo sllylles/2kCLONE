@@ -7,11 +7,12 @@ config_version=5
 
 config/name="Courtside"
 config/description="Broadcast-style basketball simulation"
-config/version="0.4.1"
+config/version="0.4.2"
 run/main_scene="res://scenes/boot.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
 run/low_processor_mode=false
+config/quit_on_go_back=false
 
 [autoload]
 

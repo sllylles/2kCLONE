@@ -182,6 +182,12 @@ func _process(delta: float) -> void:
 			"%s  %s" % [state.period_label(), GameState.format_clock(state.game_clock)])
 
 
+## Android back gesture / button pauses (or resumes) the game.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST and not SceneManager.has_overlay():
+		toggle_pause()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if get_tree().paused:
 		if event.is_action_pressed("pause") or (event.is_action_pressed("ui_cancel") and pause_menu.visible):

@@ -37,7 +37,7 @@ func _ready() -> void:
 		{"id": "sprint", "action": "sprint", "def_action": "sprint", "label": "SPRINT", "def_label": "SPRINT", "r": 70.0, "hold": true},
 		{"id": "switch", "action": "", "def_action": "switch", "label": "", "def_label": "SWITCH", "r": 58.0, "hold": false},
 		# Camera and replay live in the pause menu (controllers keep their shortcuts).
-		{"id": "pause", "action": "pause", "def_action": "pause", "label": "II", "def_label": "II", "r": 44.0, "hold": false, "top": true},
+		{"id": "pause", "action": "pause", "def_action": "pause", "label": "II", "def_label": "II", "r": 52.0, "hold": false, "top": true},
 	]
 	for b in _buttons:
 		b["touch"] = -1
@@ -91,7 +91,7 @@ func _layout() -> void:
 		"pass": Vector2(rx - 320.0 * k, by - 60.0 * k),
 		"sprint": Vector2(rx - 300.0 * k, by - 260.0 * k),
 		"switch": Vector2(rx - 110.0 * k, by - 320.0 * k),
-		"pause": Vector2(rx - 40.0, sr.position.y + 44.0),
+		"pause": Vector2(rx - 110.0, sr.position.y + 62.0),
 	}
 	var custom: Dictionary = Settings.get_value("controls", "layout")
 	for b in _buttons:
@@ -155,10 +155,13 @@ func _touch_down(idx: int, p: Vector2) -> void:
 	if not b.is_empty():
 		b.touch = idx
 		var action: String = b.def_action if defense else b.action
-		Input.action_press(action)
-		if not b.hold:
-			# Tap buttons fire once; release on the next frame.
-			_release_later(b, idx)
+		if b.hold:
+			Input.action_press(action)
+		else:
+			# Tap buttons send a real input event (so _input/_unhandled_input
+			# handlers such as pause see it), then release a moment later.
+			_send_action.call_deferred(action, true)
+			_release_later(b, idx, action)
 		InputRouter.vibrate(12, 0.3)
 		get_viewport().set_input_as_handled()
 		queue_redraw()
@@ -177,18 +180,28 @@ func _touch_down(idx: int, p: Vector2) -> void:
 		queue_redraw()
 
 
-func _release_later(b: Dictionary, idx: int) -> void:
+func _release_later(b: Dictionary, idx: int, action: String) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
+	_send_action(action, false)
 	if b.touch == idx:
-		_release_button(b)
+		b.touch = -1
+		queue_redraw()
 
 
 func _release_button(b: Dictionary) -> void:
 	b.touch = -1
-	Input.action_release(b.action if b.action != "" else b.def_action)
-	Input.action_release(b.def_action)
-	queue_redraw()
+	if b.hold:
+		Input.action_release(b.action if b.action != "" else b.def_action)
+		Input.action_release(b.def_action)
+	queue_redraw()   # tap buttons release themselves (_release_later)
+
+
+static func _send_action(action: String, pressed: bool) -> void:
+	var ev := InputEventAction.new()
+	ev.action = action
+	ev.pressed = pressed
+	Input.parse_input_event(ev)
 
 
 func _touch_up(idx: int, p: Vector2) -> void:

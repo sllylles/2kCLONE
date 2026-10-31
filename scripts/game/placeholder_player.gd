@@ -34,7 +34,8 @@ func setup(player: Dictionary, team: Dictionary, home_colors: bool) -> void:
 	height_ft = float(player.get("height_in", 78)) / 12.0
 	var jersey := UIKit.team_color(team) if not home_colors else Color(0.96, 0.96, 0.95)
 	var trim := UIKit.team_color(team, "secondary") if not home_colors else UIKit.team_color(team)
-	var skin := DataDB.color(player.get("skin", "#8D5524"))
+	# Neutral mannequin tone unless the roster sets one; appearance comes in Phase 2/6.
+	var skin := DataDB.color(player.get("skin", "#A58D7A"))
 	var k := height_ft / 6.5
 	_body = Node3D.new()
 	add_child(_body)
@@ -76,7 +77,7 @@ func setup(player: Dictionary, team: Dictionary, home_colors: bool) -> void:
 	head.position = Vector3(0, shoulder_y + 0.85 * k, 0) * FT
 	_body.add_child(head)
 	# Numbers front and back.
-	var num := str(int(player.get("number", 0)))
+	var num := _jersey(player)
 	for back in [false, true]:
 		var b := Basis.IDENTITY if back else Basis(Vector3.UP, PI)   # front faces -Z
 		MeshKit.label3d(_body, num, 96, 0.0042 * k, trim, Vector3(0, hip_y + 1.25 * k, (0.45 if back else -0.45) * k) * FT, b)
@@ -95,6 +96,12 @@ func setup(player: Dictionary, team: Dictionary, home_colors: bool) -> void:
 	add_child(_ring)
 	for child in find_children("*", "VisualInstance3D", true, false):
 		(child as VisualInstance3D).layers = 4
+
+
+## Jersey numbers are strings so "0" and "00" stay different.
+static func _jersey(player: Dictionary) -> String:
+	var n: Variant = player.get("number", "0")
+	return str(int(n)) if n is float else str(n)
 
 
 func _capsule(parent: Node3D, radius: float, length: float, pos: Vector3, m: Material, scale_v := Vector3.ONE) -> MeshInstance3D:

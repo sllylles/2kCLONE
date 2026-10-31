@@ -2,7 +2,7 @@
 
 Single source of truth for status. Updated at the end of every phase.
 
-**Current build:** v0.1.0, Phase 0 + Phase 1 done. **Waiting for device testing before Phase 2.**
+**Current build:** v0.2.0, Phase 0 + Phase 1 done, with real teams, rosters and logos. **Waiting for device testing before Phase 2.**
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -57,6 +57,14 @@ See README, "What to test". Things worth checking on the Pixel 10 Pro:
 
 ---
 
+## v0.2: Real teams ✅
+- [x] All 30 teams with real names, colors and arenas; court paint and seats in team colors
+- [x] 283 players from 2025-26 opening-night rosters bundled as an offline fallback
+- [x] `tools/build_rosters.py --espn --logos` pulls current rosters and logos; CI runs it before every build
+- [x] Logos appear at center court automatically when present (`data/logos/<TEAM>.png`)
+- [ ] Ratings are rough: star overalls are hand-set and everyone else is estimated from experience. Stat-based ratings come in Phase 4.
+- [ ] Player appearance (skin, hair, faces) stays neutral until the Phase 2/6 appearance system; it will be editable per player
+
 ## Phase 2: Players & animation ⏭ Next
 - [ ] Blender + MPFB2 headless scripts in `tools/blender/` (see `docs/ART_PIPELINE.md`)
 - [ ] Shared humanoid skeleton; body blend shapes for height/weight/wingspan/muscle; 2 LODs; glTF export
@@ -64,7 +72,7 @@ See README, "What to test". Things worth checking on the Pixel 10 Pro:
 - [ ] Locomotion blend spaces (idle/jog/sprint/strafe/backpedal) via AnimationTree
 - [ ] Dribble moves, jump shots, layups, floaters, dunks, passes, rebounds, blocks, steals, defensive slides, bumps
 - [ ] Foot IK and ball-hand IK
-- [ ] Animation sources: needs your OK on the license before anything goes in (CC0 sets preferred; raw Mixamo files can't be committed to a public repo)
+- [ ] Animation sources: CC0 only (approved), e.g. Quaternius and Kenney; every set logged in CREDITS.md
 
 ## Phase 3: Controls & gameplay feel
 - [ ] Full touch layout editor (drag buttons), contextual defense actions
@@ -95,4 +103,5 @@ See README, "What to test". Things worth checking on the Pixel 10 Pro:
 - **Geometry in code:** court, arena and HUD are generated procedurally, so there are no binary scene files to merge and everything follows the data.
 - **Units:** court math in feet (`CourtSpec`), scene in meters.
 - **Render layers:** 1 court/hoops, 2 stands/crowd (dimmer light), 3 players/ball.
-- **IP:** bundled teams and players are fictional and generated. No league, team or player names or logos are included; rosters and logos are editable data.
+- **Teams & players (v0.2):** real teams, arenas and rosters for a personal build. Rosters are refreshed from ESPN in CI; logos are downloaded at build time and git-ignored, never committed.
+- **Animations (Phase 2):** CC0 sources only (approved).

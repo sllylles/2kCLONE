@@ -12,3 +12,5 @@ build/
 .DS_Store
 *.blend1
 __pycache__/
+# Team logos are downloaded at build time (tools/build_rosters.py --logos), never committed
+data/logos/

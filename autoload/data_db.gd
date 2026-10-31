@@ -13,6 +13,7 @@ var teams: Array = []          # Array[Dictionary]
 var players: Array = []        # Array[Dictionary]
 var arenas: Array = []
 var camera_presets: Array = []
+var roster_source := ""
 
 var _teams_by_id := {}
 var _arenas_by_id := {}
@@ -25,7 +26,9 @@ func _ready() -> void:
 
 func reload() -> void:
 	teams = load_json("teams").get("teams", [])
-	players = load_json("players").get("players", [])
+	var pj := load_json("players")
+	players = pj.get("players", [])
+	roster_source = str(pj.get("source", ""))
 	arenas = load_json("arenas").get("arenas", [])
 	camera_presets = load_json("camera_presets").get("presets", [])
 	_teams_by_id.clear()
@@ -80,19 +83,29 @@ static func color(hex: String, fallback := Color.WHITE) -> Color:
 	return Color.from_string(hex, fallback)
 
 
-## Returns the team's logo texture: a PNG from the team's "logo" field if it
-## exists (res:// or user://), otherwise null so callers draw a generated badge.
+## Returns the team's logo: the team's "logo" path if set, else
+## user://data/logos/<id>.png, else res://data/logos/<id>.png. Null means
+## callers draw a generated badge.
 func team_logo(team_id: String) -> Texture2D:
 	if _logo_cache.has(team_id):
 		return _logo_cache[team_id]
 	var tex: Texture2D = null
-	var path: String = team(team_id).get("logo", "")
-	if not path.is_empty():
-		if path.begins_with("res://") and ResourceLoader.exists(path):
-			tex = load(path)
+	var candidates: Array[String] = []
+	var explicit: String = team(team_id).get("logo", "")
+	if not explicit.is_empty():
+		candidates.append(explicit)
+	candidates.append("%s/logos/%s.png" % [OVERRIDE_DIR, team_id])
+	candidates.append("%s/logos/%s.png" % [DATA_DIR, team_id])
+	for path in candidates:
+		if path.begins_with("res://"):
+			if ResourceLoader.exists(path):
+				tex = load(path)
 		elif FileAccess.file_exists(path):
 			var img := Image.load_from_file(path)
 			if img:
+				img.generate_mipmaps()
 				tex = ImageTexture.create_from_image(img)
+		if tex:
+			break
 	_logo_cache[team_id] = tex
 	return tex

@@ -4,8 +4,15 @@ Every third-party asset or library in this repository is listed here with its
 license. Anything not listed was written for Courtside (code, shaders, data) or is
 generated procedurally at runtime (court, arena, crowd, LED boards, logos, UI).
 
-No asset in this project is paid, and no real league, team, player or brand names,
-logos or likenesses are bundled.
+No asset in this project is paid.
+
+## Team and player data (personal use)
+
+Team names, colors, arena names and rosters are real-world facts kept as data in
+`data/*.json` for a personal, non-distributed build. Team logos are **not** in the repo:
+`tools/build_rosters.py --logos` downloads them from ESPN's public CDN at build time
+into the git-ignored `data/logos/`. Logos and names belong to their respective owners.
+The fallback rosters are from 2025-26 opening night; CI refreshes them from ESPN's public API.
 
 ## Engine & tools
 

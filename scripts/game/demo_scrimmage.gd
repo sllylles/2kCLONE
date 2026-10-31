@@ -48,12 +48,11 @@ func setup(game_state: GameState, home: Dictionary, away: Dictionary) -> void:
 		var starters: Array = rosters[t].filter(func(p): return p.get("starter", false))
 		if starters.size() < 5:
 			starters = rosters[t].slice(0, 5)
-		var by_pos := {}
-		for p in starters:
-			by_pos[p.pos] = p
-		var order := ["PG", "SG", "SF", "PF", "C"]
+		# Shortest to tallest fills the PG..C spots, so two centers never share a slot.
+		starters = starters.slice(0, 5)
+		starters.sort_custom(func(a, b): return a.get("height_in", 78) < b.get("height_in", 78))
 		for i in 5:
-			var pdata: Dictionary = by_pos.get(order[i], starters[i])
+			var pdata: Dictionary = starters[i]
 			var pl := PlaceholderPlayer.new()
 			pl.name = "%s_%d" % [team.abbr, i]
 			add_child(pl)

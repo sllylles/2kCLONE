@@ -36,6 +36,9 @@ jobs:
           unzip -q -j tpl.tpz templates/android_debug.apk templates/android_release.apk templates/version.txt -d $T
           rm godot.zip tpl.tpz
 
+      - name: Update rosters and logos (falls back to bundled rosters if ESPN is down)
+        run: python3 tools/build_rosters.py --espn --logos
+
       - name: Import project
         run: ~/godot/godot --headless --path . --import || true
 

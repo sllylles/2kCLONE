@@ -141,8 +141,8 @@ func _build_news() -> Control:
 	var v := VBoxContainer.new()
 	p.add_child(v)
 	v.add_child(UIKit.label("WHAT'S NEW", 22, 800, UIKit.ACCENT_2, true))
-	v.add_child(UIKit.label("Phase 1 build: regulation court, full arena, broadcast cameras & HUD", 34, 800))
-	v.add_child(UIKit.label("Placeholder players run a demo scrimmage so you can try every camera. Real players arrive in Phase 2.", 22, 500, UIKit.TEXT_DIM))
+	v.add_child(UIKit.label("All 30 teams, real rosters, broadcast cameras & arenas", 34, 800))
+	v.add_child(UIKit.label("Rosters: %s.  Players are placeholders until Phase 2." % DataDB.roster_source, 22, 500, UIKit.TEXT_DIM))
 	var spacer := Control.new()
 	spacer.custom_minimum_size.y = 24
 	var wrap := VBoxContainer.new()

@@ -42,8 +42,18 @@ const REMAPPABLE := {
 }
 
 const STICK_DEADZONE := 0.18
+## Pro stick: a quick flick is a dribble move; holding past this many seconds
+## starts a jump shot that releases when the stick (or finger) lets go.
+const PRO_HOLD_TIME := 0.22
 
 var device: Device = Device.KEYBOARD
+var _pro_t := -1.0           # seconds the pro stick has been deflected, -1 = neutral
+var _pro_dir := Vector2.ZERO
+var _pro_shooting := false
+var _flick := ""
+var _shot_started := false
+var _touch_hold_t := -1.0     # finger resting in the touch pro-stick zone
+var _touch_shooting := false
 var _rebinding_action := ""
 var _rebinding_gamepad := true
 
@@ -82,6 +92,68 @@ func move_vector() -> Vector2:
 
 func pro_stick_vector() -> Vector2:
 	return Input.get_vector("pro_left", "pro_right", "pro_up", "pro_down", STICK_DEADZONE)
+
+
+## Pro-stick gesture tracking (gamepad right stick, IJKL keys, touch zone).
+func _physics_process(delta: float) -> void:
+	if _touch_hold_t >= 0.0:
+		_touch_hold_t += delta
+		if _touch_hold_t >= PRO_HOLD_TIME and not _touch_shooting:
+			_touch_shooting = true
+			_shot_started = true
+	var v := pro_stick_vector()
+	if v.length() > 0.55:
+		if _pro_t < 0.0:
+			_pro_t = 0.0
+		_pro_t += delta
+		_pro_dir = v
+		if _pro_t >= PRO_HOLD_TIME and not _pro_shooting:
+			_pro_shooting = true
+			_shot_started = true
+	elif _pro_t >= 0.0:
+		if not _pro_shooting:
+			var d := _pro_dir
+			if absf(d.x) > absf(d.y):
+				_flick = "right" if d.x > 0.0 else "left"
+			else:
+				_flick = "down" if d.y > 0.0 else "up"
+		_pro_t = -1.0
+		_pro_shooting = false
+
+
+## Touch pro-stick zone: finger down / swipe / finger up.
+func touch_pro_begin() -> void:
+	_touch_hold_t = 0.0
+
+
+func touch_pro_swipe(dir: String) -> void:
+	if not _touch_shooting:
+		_flick = dir
+		_touch_hold_t = -1.0
+
+
+func touch_pro_end() -> void:
+	_touch_hold_t = -1.0
+	_touch_shooting = false
+
+
+## A completed quick flick since the last call ("left"/"right"/"up"/"down"), or "".
+func pro_flick() -> String:
+	var f := _flick
+	_flick = ""
+	return f
+
+
+## True once when a held pro stick starts a shot.
+func pro_shot_started() -> bool:
+	var s := _shot_started
+	_shot_started = false
+	return s
+
+
+## Still holding the pro-stick shot (release = let go of the shot).
+func pro_shot_held() -> bool:
+	return _pro_shooting or _touch_shooting
 
 
 func vibrate(ms: int, amplitude := 0.5) -> void:

@@ -40,7 +40,7 @@ differently signed build, uninstall first (`adb uninstall com.courtside.game`).
 
 ---
 
-## What to test (Phases 0–2)
+## What to test (Phases 0–3)
 
 | Area | How |
 |---|---|
@@ -56,7 +56,11 @@ differently signed build, uninstall first (`adb uninstall com.courtside.game`).
 | Controls | Left half: floating stick. Right: SHOOT / PASS / SPRINT (BLOCK / STEAL / SWITCH on defense), swipe zone for the pro stick. Leave the controls for 3 s and the AI plays for you. Bluetooth controllers work with no setup (Xbox layout: X shoot, A pass, RT sprint). |
 | Pause | **II** button / Menu / Esc: resume, camera, replay, replay intro, settings, quit. |
 | Players | Rigged players at their real height, weight and wingspan, in team uniforms with their numbers and the team name. Watch dribbling, jump shots, layups, floaters, dunks, passes and catches, rebounds, blocks, contests, steals, bumps and celebrations. |
-| Dribble moves | With the ball, swipe in the **pro stick zone** (or flick the right stick): toward your off hand = crossover (spin while sprinting), toward your ball hand = behind the back, down = stepback (between the legs while moving), up = hesitation. |
+| Dribble moves | With the ball, swipe in the **pro stick zone** (or flick the right stick): toward your off hand = crossover (spin while sprinting), toward your ball hand = behind the back, down = stepback (between the legs while moving), up = hesitation (or a layup/dunk when you're driving at the rim). |
+| Shooting | **Hold SHOOT** (or rest a finger in the pro-stick zone / hold the right stick) and **let go at the top of the jump**. The meter beside the shooter fills toward the release point; the green band is your timing window, bigger for better shooters and open looks, smaller when contested, tired or off a stepback. You get a grade (Excellent, Good, Slightly Early/Late, Early/Late, Very Early/Late). Settings → Gameplay: meter Arc / Bar / Off, or **Real player %** (no timing; ratings only). |
+| Ball physics | Shots, passes and loose balls are physical: rim and backboard bounces, swishes, bank shots, long rebounds, deflections, out of bounds. Whoever reaches the ball gets it. |
+| Movement | Momentum: sprinting players can't cut on a dime. Stamina drains while sprinting (the ring under your player turns red), which slows you and shrinks your shot window. Driving into a defender causes contact: you slow down and your shot is more contested. |
+| Touch layout | Settings → Controls → **EDIT TOUCH LAYOUT**: drag any button anywhere; RESET restores the defaults. |
 | Player Lab | **PLAY NOW → PLAYER LAB**: any player from any team, every animation, turntable, playback speed. |
 
 ---

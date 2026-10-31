@@ -25,6 +25,8 @@ var defending := false
 var has_ball := false
 ## Extra travel for moves like stepbacks and layups (ft/s, decays).
 var push := Vector3.ZERO
+## 1 = fresh, 0 = exhausted. Affects speed and the shot meter window.
+var stamina := 1.0
 
 var avatar: PlayerAvatar
 var anim: AvatarAnimator
@@ -93,10 +95,21 @@ func busy() -> bool:
 	return anim.is_busy()
 
 
+## 0..1; 1 = fresh.
+func fatigue() -> float:
+	return 1.0 - stamina
+
+
+func _speed_rating() -> float:
+	return float(data.get("ratings", {}).get("speed", 75))
+
+
 func step(delta: float) -> void:
 	var p := pos_ft()
 	var desired := Vector3.ZERO
-	var max_speed := SPRINT_SPEED if sprinting else JOG_SPEED
+	# Faster players run faster; tired players run slower.
+	var pace := lerpf(0.9, 1.08, clampf((_speed_rating() - 50.0) / 49.0, 0.0, 1.0)) * lerpf(0.8, 1.0, stamina)
+	var max_speed := (SPRINT_SPEED if sprinting and stamina > 0.05 else JOG_SPEED) * pace
 	if user_controlled:
 		desired = manual_input * max_speed
 	else:
@@ -108,6 +121,15 @@ func step(delta: float) -> void:
 			desired = to / d * minf(max_speed, d * 2.2)
 	if anim.action in ROOTED:
 		desired *= 0.15
+	# At speed you can't turn on a dime: limit how fast the heading changes.
+	var speed := velocity.length()
+	if speed > JOG_SPEED * 0.85 and desired.length() > 1.0:
+		var turn_rate := lerpf(5.0, 2.2, clampf((speed - JOG_SPEED) / (SPRINT_SPEED - JOG_SPEED), 0.0, 1.0))
+		var cur := atan2(velocity.x, velocity.z)
+		var want := atan2(desired.x, desired.z)
+		var heading := rotate_toward(cur, want, turn_rate * delta)
+		var keep := desired.length() * cos(clampf(angle_difference(heading, want), -PI / 2, PI / 2))
+		desired = Vector3(sin(heading), 0, cos(heading)) * maxf(keep, desired.length() * 0.4)
 	# Momentum: velocity can only change at ACCEL, no instant turns.
 	var dv := desired - velocity
 	var max_dv := ACCEL * delta
@@ -127,6 +149,18 @@ func step(delta: float) -> void:
 	if look_dir.length() > 0.5 and not anim.action.begins_with("spin"):
 		var want := atan2(-look_dir.x, -look_dir.z)   # -Z is forward
 		rotation.y = rotate_toward(rotation.y, want, TURN_RATE * delta)
+	# Stamina: sprinting drains it, standing around gives it back.
+	var spd := velocity.length()
+	if spd > JOG_SPEED * 1.1:
+		stamina -= 0.065 * delta
+	elif spd > 4.0:
+		stamina -= 0.012 * delta
+	else:
+		stamina += 0.05 * delta
+	stamina = clampf(stamina, 0.0, 1.0)
+	if _ring.visible:
+		(_ring.material_override as StandardMaterial3D).albedo_color = \
+			Color(0.2, 0.75, 1.0).lerp(Color(1.0, 0.25, 0.15), fatigue()) * 2.0
 	anim.velocity = velocity * FT
 	anim.defending = defending
 	anim.has_ball = has_ball

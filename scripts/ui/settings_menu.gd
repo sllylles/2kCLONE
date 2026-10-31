@@ -191,6 +191,9 @@ func _build_controls() -> void:
 	_row(p, "Button size", _slider("controls", "button_scale", 0.6, 1.6, 0.05))
 	_row(p, "Button opacity", _slider("controls", "button_opacity", 0.15, 1.0, 0.05))
 	_row(p, "Vibration", _toggle("controls", "vibration"))
+	var edit := UIKit.button("EDIT TOUCH LAYOUT", Vector2(360, 64))
+	edit.pressed.connect(func(): SceneManager.open_overlay("touch_layout"))
+	_row(p, "Button positions", edit, "Drag any button where your thumbs want it.")
 	p.add_child(UIKit.label("BUTTON MAPPING", 26, 800, UIKit.ACCENT_2, true))
 	var hint := UIKit.label("Tap a binding, then press the new button or key. Esc cancels.", 20, 500, UIKit.TEXT_DIM)
 	p.add_child(hint)
@@ -248,6 +251,6 @@ func _build_gameplay() -> void:
 		["Rookie", "Pro", "All-Star", "Superstar", "Hall of Fame"],
 		["rookie", "pro", "all_star", "superstar", "hall_of_fame"]), "Used by the AI from Phase 4.")
 	_row(p, "Shot meter", _options("gameplay", "meter_style", ["Arc", "Bar", "Off"], ["arc", "bar", "off"]),
-		"Used from Phase 3.")
+		"Hold Shoot and let go at the top of the jump. Off hides the meter (timing still counts).")
 	_row(p, "Real player %", _toggle("gameplay", "real_player_pct"), "Shot success from ratings only, no timing.")
 	_row(p, "GOAT builds (offline)", _toggle("gameplay", "goat_builds"), "Unlocks the max-everything MyPlayer preset.")

@@ -13,6 +13,9 @@ const SWIPE_MIN := 60.0
 const PULSE_TIME := 0.18
 
 var defense := false
+## Layout editor: buttons can be dragged and nothing is pressed.
+var edit_mode := false
+var _dragging := {}          # touch index -> button dict
 var _buttons: Array[Dictionary] = []
 var _stick_touch := -1
 var _stick_origin := Vector2.ZERO
@@ -50,7 +53,7 @@ func _ready() -> void:
 func _refresh_settings() -> void:
 	_scale = float(Settings.get_value("controls", "button_scale"))
 	_opacity = float(Settings.get_value("controls", "button_opacity"))
-	var on := InputRouter.touch_controls_visible()
+	var on := InputRouter.touch_controls_visible() or edit_mode
 	if visible and not on:
 		release_all()
 	visible = on
@@ -90,9 +93,27 @@ func _layout() -> void:
 		"replay": Vector2(s.x - 190.0, 70.0),
 		"pause": Vector2(s.x - 80.0, 70.0),
 	}
+	var custom: Dictionary = Settings.get_value("controls", "layout")
 	for b in _buttons:
 		b.center = positions[b.id]
+		if custom.has(b.id):
+			var f: Array = custom[b.id]
+			b.center = Vector2(float(f[0]) * s.x, float(f[1]) * s.y)
 	queue_redraw()
+
+
+## Saves the current button positions as screen fractions.
+func save_layout() -> void:
+	var s := get_viewport_rect().size
+	var out := {}
+	for b in _buttons:
+		out[b.id] = [b.center.x / s.x, b.center.y / s.y]
+	Settings.set_value("controls", "layout", out)
+
+
+func reset_layout() -> void:
+	Settings.set_value("controls", "layout", {})
+	_layout()
 
 
 func _pro_zone() -> Rect2:
@@ -122,6 +143,13 @@ func _input(event: InputEvent) -> void:
 
 
 func _touch_down(idx: int, p: Vector2) -> void:
+	if edit_mode:
+		for eb in _buttons:
+			if p.distance_to(eb.center) <= eb.r * 1.2 * (1.0 if eb.get("top", false) else _scale):
+				_dragging[idx] = eb
+				get_viewport().set_input_as_handled()
+				return
+		return
 	var b := _button_at(p)
 	if not b.is_empty():
 		b.touch = idx
@@ -137,6 +165,7 @@ func _touch_down(idx: int, p: Vector2) -> void:
 	if _pro_zone().has_point(p) and _pro_touch == -1:
 		_pro_touch = idx
 		_pro_start = p
+		InputRouter.touch_pro_begin()     # resting finger = jump shot (see InputRouter)
 		get_viewport().set_input_as_handled()
 		return
 	if p.x < get_viewport_rect().size.x * 0.45 and _stick_touch == -1:
@@ -162,6 +191,11 @@ func _release_button(b: Dictionary) -> void:
 
 
 func _touch_up(idx: int, p: Vector2) -> void:
+	if edit_mode:
+		if _dragging.has(idx):
+			_dragging.erase(idx)
+			save_layout()
+		return
 	for b in _buttons:
 		if b.touch == idx:
 			_release_button(b)
@@ -174,9 +208,16 @@ func _touch_up(idx: int, p: Vector2) -> void:
 	elif idx == _pro_touch:
 		_pro_touch = -1
 		_fire_swipe(p - _pro_start)
+		InputRouter.touch_pro_end()
 
 
 func _touch_drag(idx: int, p: Vector2) -> void:
+	if edit_mode:
+		if _dragging.has(idx):
+			var s := get_viewport_rect().size
+			_dragging[idx].center = p.clamp(Vector2(40, 40), s - Vector2(40, 40))
+			queue_redraw()
+		return
 	if idx == _stick_touch:
 		var r := STICK_RADIUS * _scale
 		var v := p - _stick_origin
@@ -189,7 +230,7 @@ func _touch_drag(idx: int, p: Vector2) -> void:
 		_press_axis("move_left", "move_right", n.x)
 		_press_axis("move_up", "move_down", n.y)
 		queue_redraw()
-	elif idx == _pro_touch and (p - _pro_start).length() > SWIPE_MIN * 2.0:
+	elif idx == _pro_touch and (p - _pro_start).length() > SWIPE_MIN:
 		_fire_swipe(p - _pro_start)
 		_pro_start = p
 
@@ -209,14 +250,14 @@ func _press_axis(neg: String, pos: String, v: float) -> void:
 func _fire_swipe(d: Vector2) -> void:
 	if d.length() < SWIPE_MIN:
 		return
-	var action := ""
+	var dir := ""
 	if absf(d.x) > absf(d.y):
-		action = "pro_right" if d.x > 0 else "pro_left"
+		dir = "right" if d.x > 0 else "left"
 	else:
-		action = "pro_down" if d.y > 0 else "pro_up"
-	_pro_pulse = action
+		dir = "down" if d.y > 0 else "up"
+	_pro_pulse = dir
 	_pro_pulse_t = PULSE_TIME
-	Input.action_press(action)
+	InputRouter.touch_pro_swipe(dir)
 	InputRouter.vibrate(10, 0.25)
 
 
@@ -224,7 +265,6 @@ func _process(delta: float) -> void:
 	if _pro_pulse_t > 0.0:
 		_pro_pulse_t -= delta
 		if _pro_pulse_t <= 0.0:
-			Input.action_release(_pro_pulse)
 			_pro_pulse = ""
 		queue_redraw()
 
@@ -239,7 +279,7 @@ func _draw() -> void:
 		zc = Color(UIKit.ACCENT_2, 0.25)
 	draw_rect(z, zc, true)
 	draw_rect(z, Color(1, 1, 1, 0.15 * a), false, 2.0)
-	draw_string(font, z.position + Vector2(16, 34), "SWIPE: PRO STICK", HORIZONTAL_ALIGNMENT_LEFT, -1, 20,
+	draw_string(font, z.position + Vector2(16, 34), "SWIPE: MOVES  •  HOLD: SHOOT", HORIZONTAL_ALIGNMENT_LEFT, -1, 20,
 		Color(1, 1, 1, 0.35 * a))
 	# Move stick
 	if _stick_touch != -1:
@@ -254,7 +294,7 @@ func _draw() -> void:
 	# Buttons
 	for b in _buttons:
 		var action: String = b.def_action if defense else b.action
-		if action == "":
+		if action == "" and not edit_mode:
 			continue
 		var top: bool = b.get("top", false)
 		var r: float = b.r * (1.0 if top else _scale)
@@ -265,6 +305,11 @@ func _draw() -> void:
 		draw_circle(b.center, r, fill)
 		draw_arc(b.center, r, 0, TAU, 48, Color(1, 1, 1, (0.9 if pressed else 0.5) * minf(1.0, a * 1.5)), 3.0, true)
 		var text: String = b.def_label if defense else b.label
+		if edit_mode:
+			text = b.label if b.label != "" else b.def_label
+			if b.def_label != b.label and b.label != "":
+				text = "%s/%s" % [b.label, b.def_label]
+			draw_arc(b.center, r + 6.0, 0, TAU, 48, UIKit.ACCENT_2, 2.0, true)
 		var fs := int((18 if top else 24) * (1.0 if top else _scale))
 		var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		draw_string(font, b.center + Vector2(-w / 2.0, fs * 0.35), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs,

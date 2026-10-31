@@ -13,6 +13,7 @@ const SCENES := {
 }
 const OVERLAYS := {
 	"settings": "res://scenes/settings_menu.tscn",
+	"touch_layout": "res://scenes/touch_layout_editor.tscn",
 }
 
 var params: Dictionary = {}          # arguments for the scene being opened

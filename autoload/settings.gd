@@ -28,6 +28,7 @@ const DEFAULTS := {
 		"button_opacity": 0.55,    # 0.15 – 1.0
 		"vibration": true,
 		"bindings": {},            # action -> Array of serialized events (InputRouter)
+		"layout": {},              # touch button id -> [x, y] as screen fractions
 	},
 	"camera": {
 		"preset": "broadcast",

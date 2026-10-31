@@ -85,6 +85,11 @@ func _ready() -> void:
 	sim.handler_changed.connect(_on_handler_changed)
 	sim.possession_changed.connect(_on_possession_changed)
 	sim.announce.connect(func(text): hud.toast(text, UIKit.ACCENT_2))
+	var meter := ShotMeter.new()
+	meter.camera = director.camera
+	hud.add_child(meter)
+	sim.meter_started.connect(meter.start)
+	sim.meter_graded.connect(meter.show_grade)
 	director.preset_changed.connect(func(_id, n): hud.show_camera_name(n))
 	director.intro_finished.connect(_on_intro_finished)
 	_on_possession_changed(state.possession)

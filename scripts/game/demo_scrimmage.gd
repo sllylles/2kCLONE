@@ -2,9 +2,12 @@ class_name DemoScrimmage
 extends Node3D
 ## Stand-in for the real game simulation (Phase 4): ten animated players run a
 ## simple motion offense with dribble moves, passes, jump shots, layups,
-## floaters, dunks, rebounds, blocks, steals and bumps, so the cameras,
-## replays, animations and HUD have live action to show. Every action plays
-## its animation and the ball leaves the hands on the clip's release event.
+## floaters, dunks, rebounds, blocks, steals and bumps.
+##
+## Phase 3: the ball is physical (BallPhysics) once it leaves a player's hands:
+## shots, passes and loose balls fly, hit rim/backboard/floor, and whoever
+## reaches it gets it. Shots are timed with the shot meter (ShotTiming): hold
+## Shoot and let go at the top of the jump.
 ## The user controls the home team's ball handler (or the on-ball defender).
 
 signal shot_made(team: int, points: int, shooter: CourtPlayer)
@@ -12,6 +15,8 @@ signal shot_missed(team: int)
 signal handler_changed(player: CourtPlayer)
 signal possession_changed(team: int)
 signal announce(text: String)
+signal meter_started(player: CourtPlayer, window: float, ideal: float)
+signal meter_graded(player: CourtPlayer, grade: String, good: bool, offset: float)
 
 const FT := CourtSpec.FT
 ## Seconds without stick/button input before the AI plays for the user.
@@ -31,7 +36,15 @@ var stats := {}                     # player id -> {"pts": int}
 ## Home attacks +X in the first half.
 var home_side := 1
 
-var _flight := {}                   # active ball flight
+var phys := BallPhysics.new()       # the ball whenever nobody holds it
+var _flight := {}                   # scripted flights (the make drop) only
+var _shot := {}                     # the shot currently in the air
+var _pass := {}                     # the pass currently in the air
+var _last_touch := -1               # team that last touched the ball
+var _rebounder: CourtPlayer
+var _intercept_rolled := {}
+var _thrower: CourtPlayer           # who just let go of the ball (can't re-catch it instantly)
+var _contact := {}                  # player -> seconds left of drive contact
 var _poss_time := 0.0
 var _next_pass := 2.0
 var _shoot_at := 10.0
@@ -124,6 +137,9 @@ func _start_possession(team: int, from_center := false) -> void:
 		defense[i].set_pos_ft(start + Vector3(side * 5.0, 0, 0))
 		defense[i].velocity = Vector3.ZERO
 	_pending = {}
+	_shot = {}
+	_pass = {}
+	phys.active = false
 	_give_ball(offense[0])
 	possession_changed.emit(team)
 	_update_user()
@@ -133,6 +149,10 @@ func _start_possession(team: int, from_center := false) -> void:
 func _give_ball(p: CourtPlayer) -> void:
 	holder = p
 	_flight = {}
+	phys.active = false
+	_pass = {}
+	_rebounder = null
+	_last_touch = p.team_idx
 	for q in players:
 		q.anim.reach_for(Vector3.INF)
 	handler_changed.emit(p)
@@ -179,7 +199,7 @@ func _spot(i: int, side: int) -> Vector3:
 	return Vector3(side * (CourtSpec.HALF_LENGTH - s.x), 0, s.y)
 
 
-# --- Actions ------------------------------------------------------------------------
+# --- Shooting ---------------------------------------------------------------------------
 
 func _shot_clip(shooter: CourtPlayer, dist: float) -> String:
 	var r: Dictionary = shooter.data.get("ratings", {})
@@ -192,8 +212,18 @@ func _shot_clip(shooter: CourtPlayer, dist: float) -> String:
 	return "jumpshot"
 
 
-func try_shoot() -> void:
-	if holder == null or not _flight.is_empty() or not _pending.is_empty() or _dead_ball > 0.0 or holder.busy():
+func meter_enabled() -> bool:
+	return Settings.get_value("gameplay", "meter_style") != "off" and not Settings.get_value("gameplay", "real_player_pct")
+
+
+## Starts a shot. `user_timed`: the user releases Shoot to time it (meter).
+## `force_clip` picks the shot type (pro stick: "finish" = layup/dunk).
+func try_shoot(user_timed := false, force_clip := "") -> void:
+	if holder == null or phys.active or not _pending.is_empty() or _dead_ball > 0.0:
+		return
+	# Shots can come straight out of a stepback; any other action blocks them.
+	var from_stepback := holder.anim.action == "stepback"
+	if holder.busy() and not from_stepback:
 		return
 	var shooter := holder
 	var side := attack_side(shooter.team_idx)
@@ -201,46 +231,130 @@ func try_shoot() -> void:
 	var dist := CourtSpec.shot_distance_ft(p2, side)
 	var three := CourtSpec.is_three_pointer(p2, side)
 	var clip := _shot_clip(shooter, dist)
+	if force_clip == "finish":
+		clip = "dunk" if dist < 8.0 and clip == "dunk" else ("layup" if dist < 14.0 else clip)
+	elif force_clip == "jumpshot" and dist > 6.0:
+		clip = "jumpshot"
 	var ratings: Dictionary = shooter.data.get("ratings", {})
-	var pct := 0.0
-	match clip:
-		"dunk":
-			pct = 0.85 + float(ratings.get("dunk", 70)) / 1000.0
-		"layup":
-			pct = 0.45 + float(ratings.get("layup", 70)) / 400.0
-		"floater":
-			pct = 0.25 + float(ratings.get("close_shot", 70)) / 400.0
-		_:
-			pct = (0.18 + float(ratings.get("three_point", 70)) / 400.0) if three \
-				else (0.25 + float(ratings.get("mid_range", 70)) / 400.0)
-	pct -= maxf(0.0, dist - 26.0) * 0.03
 	var defender := _nearest_defender(shooter)
-	var contest := defender.pos_ft().distance_to(shooter.pos_ft()) if defender else 99.0
-	pct -= clampf((6.0 - contest) * 0.04, 0.0, 0.2)
+	var d_dist := defender.pos_ft().distance_to(shooter.pos_ft()) if defender else 99.0
+	var hand_up := defender != null and defender.anim.action in ["contest", "block"]
+	var h_diff := (defender.height_ft() - shooter.height_ft()) * 12.0 if defender else 0.0
+	var contest := ShotTiming.contest_level(d_dist, hand_up, h_diff)
+	if _contact.has(shooter):
+		contest = minf(1.0, contest + 0.35)        # bumped on the drive
+	var kind := clip
+	var difficulty: float = ShotTiming.DIFFICULTY.get(clip, 1.0)
+	if clip == "jumpshot" and shooter.velocity.length() > 6.0:
+		difficulty = ShotTiming.DIFFICULTY.jumpshot_moving
+	if from_stepback:
+		difficulty = ShotTiming.DIFFICULTY.stepback
+	var rating_key: String = {"dunk": "dunk", "layup": "layup", "floater": "close_shot"}.get(clip,
+		"three_point" if three else "mid_range")
+	var rating := float(ratings.get(rating_key, 70))
+	var window := ShotTiming.green_window(rating, contest, shooter.fatigue(), difficulty)
 	var basket := Vector3(side * CourtSpec.basket_x(), 0, 0)
 	shooter.face_target = basket
 	shooter.look_at_now(basket)
 	shooter.play(clip)
-	var release := AnimLibrary.event_time(clip, "release", 0.5)
+	var ideal := AnimLibrary.event_time(clip, "release", 0.5)
 	if clip in ["dunk", "layup"]:
 		# Carry the shooter in to the rim for the finish.
 		var to := basket - shooter.pos_ft()
 		to.y = 0.0
 		var travel := maxf(0.0, to.length() - (2.0 if clip == "dunk" else 3.0))
-		shooter.push = to.normalized() * travel / maxf(0.2, release * 0.8)
-	_pending = {"kind": "shot", "player": shooter, "clip": clip, "made": _rng.randf() < pct,
-		"three": three, "side": side, "dist": dist, "blocked": false}
+		shooter.push = to.normalized() * travel / maxf(0.2, ideal * 0.8)
+	var timed := user_timed and meter_enabled() and clip != "dunk"
+	_pending = {"kind": "shot", "player": shooter, "clip": clip, "three": three, "side": side, "dist": dist,
+		"contest": contest, "window": window, "ideal": ideal, "user_timed": timed, "blocked": false,
+		"base": ShotTiming.base_chance(kind, dist, three, ratings, contest),
+		"offset": null if timed else ShotTiming.ai_offset(rating, _rng) * (0.4 if clip == "dunk" else 1.0)}
 	state.running = true
+	if timed:
+		meter_started.emit(shooter, window, ideal)
 	# Closest defender contests (or tries to block) when he is near.
-	if defender and contest < 8.0 and not defender.busy() and not defender.user_controlled:
-		var block_try := contest < 4.5 and _rng.randf() < 0.35
+	if defender and d_dist < 8.0 and not defender.busy() and not defender.user_controlled:
+		var block_try := d_dist < 4.5 and _rng.randf() < 0.35
+		defender.look_at_now(shooter.pos_ft())
 		defender.play("block" if block_try else "contest")
-		if block_try and clip != "dunk" and _rng.randf() < 0.3:
+		if block_try and clip != "dunk" and _rng.randf() < 0.25:
 			_pending.blocked = true
 
 
+## Called every frame while a shot is pending: reads the user's release,
+## then lets the ball go at the right moment.
+func _update_pending_shot() -> void:
+	var f := _pending
+	var shooter: CourtPlayer = f.player
+	var t := shooter.anim.action_time if shooter.anim.action == f.clip else 99.0
+	if f.offset == null:
+		var still_held := Input.is_action_pressed("shoot") or InputRouter.pro_shot_held()
+		if not still_held or t > f.ideal + 0.32:
+			f.offset = t - f.ideal
+	if f.offset != null:
+		var release_at: float = f.ideal + clampf(f.offset, 0.0, 0.3)
+		if t >= release_at:
+			_release_shot()
+
+
+func _release_shot() -> void:
+	var f := _pending
+	_pending = {}
+	var shooter: CourtPlayer = f.player
+	var side := int(f.side)
+	var rim := BallPhysics.rim_center(side)
+	var from := ball.global_position
+	var g := ShotTiming.grade(float(f.offset), float(f.window))
+	var chance := ShotTiming.make_chance(float(f.base), g) if f.clip != "dunk" else float(f.base)
+	var made := _rng.randf() < chance
+	if f.user_timed or (shooter == user and Settings.get_value("gameplay", "meter_style") != "off"):
+		meter_graded.emit(shooter, ShotTiming.GRADE_TEXT[g], g <= ShotTiming.Grade.GOOD, float(f.offset))
+	holder = null
+	_thrower = shooter
+	_last_touch = shooter.team_idx
+	_shot = {"shooter": shooter, "team": shooter.team_idx, "three": f.three, "side": side, "clip": f.clip}
+	_intercept_rolled = {}
+	if f.blocked:
+		announce.emit("BLOCKED!")
+		var away := (from - rim)
+		away.y = 0.0
+		phys.launch(from, away.normalized() * 4.5 + Vector3(_rng.randf_range(-2, 2), 1.5, _rng.randf_range(-2, 2)))
+		_shot = {}
+		_plan_rebound()
+		return
+	if f.clip == "dunk":
+		var off := Vector3.ZERO if made else (rim - from) * Vector3(1, 0, 1)
+		off = off.normalized() * 0.2 if not made else off
+		phys.launch(rim + Vector3(0, 0.3, 0) + off, Vector3(0, -4.0, 0) + (rim - from) * Vector3(0.3, 0, 0.3))
+		return
+	# Aim error: makes land near the center, misses well off it. Timing biases
+	# the miss short (early) or long (late).
+	var shot_dir := (rim - from) * Vector3(1, 0, 1)
+	shot_dir = shot_dir.normalized()
+	var err: Vector3
+	if made:
+		var a := _rng.randf() * TAU
+		err = Vector3(cos(a), 0, sin(a)) * _rng.randf_range(0.0, 0.04)
+	else:
+		var along := signf(float(f.offset)) if absf(float(f.offset)) > float(f.window) * 2.2 else (1.0 if _rng.randf() < 0.5 else -1.0)
+		var side_dir := shot_dir.cross(Vector3.UP)
+		err = shot_dir * along * _rng.randf_range(0.14, 0.26) + side_dir * _rng.randf_range(-0.16, 0.16)
+	var target := rim + err
+	var apex := BallPhysics.shot_apex(from, side)
+	match f.clip:
+		"layup":
+			apex = maxf(from.y, rim.y) + 0.45
+		"floater":
+			apex = maxf(from.y, rim.y) + 1.3
+	phys.launch(from, BallPhysics.solve_launch(from, target, apex))
+	if not made:
+		_plan_rebound(BallPhysics.flight_time(from, target, apex))
+
+
+# --- Passing, steals, blocks, moves ------------------------------------------------------
+
 func try_pass(direction := Vector3.ZERO) -> void:
-	if holder == null or not _flight.is_empty() or not _pending.is_empty() or _dead_ball > 0.0 or holder.busy():
+	if holder == null or phys.active or not _pending.is_empty() or _dead_ball > 0.0 or holder.busy():
 		return
 	var mates := team_players(holder.team_idx).filter(func(p): return p != holder)
 	var target: CourtPlayer = mates[_rng.randi() % mates.size()]
@@ -258,6 +372,33 @@ func try_pass(direction := Vector3.ZERO) -> void:
 	_pending = {"kind": "pass", "player": holder, "clip": clip, "target": target}
 
 
+func _release_pass() -> void:
+	var f := _pending
+	_pending = {}
+	var target: CourtPlayer = f.target
+	var passer: CourtPlayer = f.player
+	var from := ball.global_position
+	var lead := target.velocity * 0.4 * FT
+	var to := target.global_position + Vector3(0, 1.15 * target.avatar.scale.x, 0) - target.global_basis.z * 0.3 + lead
+	var dist := Vector2(from.x, from.z).distance_to(Vector2(to.x, to.z))
+	var acc := float(passer.data.get("ratings", {}).get("pass_accuracy", 70))
+	var a := _rng.randf() * TAU
+	to += Vector3(cos(a), _rng.randf_range(-0.5, 0.5), sin(a)) * (99.0 - acc) / 99.0 * 0.6
+	holder = null
+	_thrower = passer
+	_last_touch = passer.team_idx
+	_intercept_rolled = {}
+	if f.clip == "bounce_pass":
+		var floor_pt := from.lerp(to, 0.62)
+		floor_pt.y = BallPhysics.R
+		phys.launch(from, BallPhysics.solve_launch(from, floor_pt, from.y + 0.02) * 1.0)
+	else:
+		phys.launch(from, BallPhysics.solve_launch(from, to, maxf(from.y, to.y) + 0.12 + dist * 0.015))
+	_pass = {"target": target, "passer": passer}
+	target.look_at_now(passer.pos_ft())
+	target.play("catch")
+
+
 func try_steal(defender: CourtPlayer = null) -> void:
 	if defender == null:
 		defender = user
@@ -265,25 +406,28 @@ func try_steal(defender: CourtPlayer = null) -> void:
 		return
 	defender.look_at_now(holder.pos_ft())
 	defender.play("steal")
-	var success := defender.pos_ft().distance_to(holder.pos_ft()) < 5.0 and _rng.randf() < 0.3
-	_pending = {"kind": "steal", "player": defender, "clip": "steal", "success": success} if _pending.is_empty() else _pending
+	var hands := float(defender.data.get("ratings", {}).get("steal", 60))
+	var handle := float(holder.data.get("ratings", {}).get("ball_handle", 70))
+	var success := defender.pos_ft().distance_to(holder.pos_ft()) < 5.0 and _rng.randf() < 0.15 + (hands - handle) / 200.0 + 0.1
+	if _pending.is_empty():
+		_pending = {"kind": "steal", "player": defender, "clip": "steal", "success": success}
 
 
 func try_block() -> void:
-	if user == null or user.busy() or _pending.get("kind", "") != "shot":
+	if user == null or user.busy():
 		return
-	var shooter: CourtPlayer = _pending.player
-	if shooter.team_idx == user.team_idx:
-		return
-	user.look_at_now(shooter.pos_ft())
+	var shooter: CourtPlayer = _pending.get("player") if _pending.get("kind", "") == "shot" else null
+	if shooter:
+		user.look_at_now(shooter.pos_ft())
 	user.play("block")
-	if user.pos_ft().distance_to(shooter.pos_ft()) < 6.0 and _pending.clip != "dunk" and _rng.randf() < 0.35:
+	if shooter and shooter.team_idx != user.team_idx and user.pos_ft().distance_to(shooter.pos_ft()) < 6.0 \
+			and _pending.clip != "dunk" and _rng.randf() < 0.3 + float(user.data.get("ratings", {}).get("block", 60)) / 500.0:
 		_pending.blocked = true
 
 
 ## Dribble moves. dir: "left"/"right" are screen directions, "up"/"down".
 func try_move(dir: String) -> void:
-	if holder == null or holder.busy() or not _pending.is_empty() or not _flight.is_empty():
+	if holder == null or holder.busy() or not _pending.is_empty() or phys.active:
 		return
 	var hand := holder.anim.dribble_hand
 	var other := "l" if hand == "r" else "r"
@@ -308,6 +452,8 @@ func try_move(dir: String) -> void:
 	match clip:
 		"stepback":
 			holder.push = -fwd * 13.0
+			if not holder.user_controlled:
+				_shoot_at = _poss_time     # AI stepbacks lead straight into a jumper
 		"spin_r", "spin_l":
 			holder.push = fwd * 9.0
 		_:
@@ -320,9 +466,7 @@ func _on_action_event(clip: String, ev: String, p: CourtPlayer) -> void:
 		return
 	match ev:
 		"release":
-			if _pending.kind == "shot":
-				_release_shot()
-			elif _pending.kind == "pass":
+			if _pending.kind == "pass":
 				_release_pass()
 		"reach":
 			if _pending.kind == "steal":
@@ -336,53 +480,6 @@ func _on_action_event(clip: String, ev: String, p: CourtPlayer) -> void:
 					possession_changed.emit(d.team_idx)
 
 
-func _release_shot() -> void:
-	var f := _pending
-	_pending = {}
-	var shooter: CourtPlayer = f.player
-	var side := int(f.side)
-	var from := ball.global_position
-	var rim := CourtSpec.basket_position(side)
-	holder = null
-	if f.blocked:
-		announce.emit("BLOCKED!")
-		_start_rebound(from, side)
-		return
-	var to := rim
-	if not f.made:
-		to = rim + Vector3(_rng.randf_range(-0.6, 0.6), 0.1, _rng.randf_range(-0.7, 0.7)) * FT
-	var dist: float = f.dist
-	var apex := maxf(from.y, rim.y) + (2.0 + dist * 0.32) * FT
-	var dur := 0.8 + dist * 0.018
-	if f.clip == "dunk":
-		apex = maxf(from.y, rim.y) + 0.05
-		dur = 0.12
-	elif f.clip == "layup":
-		dur = 0.45
-		apex = maxf(from.y, rim.y) + 0.35
-	_flight = {"kind": "shot", "from": from, "to": to, "apex": apex, "t": 0.0, "dur": dur,
-		"made": f.made, "three": f.three, "shooter": shooter, "side": side}
-
-
-func _release_pass() -> void:
-	var f := _pending
-	_pending = {}
-	var target: CourtPlayer = f.target
-	var from := ball.global_position
-	var lead := target.velocity * 0.35 * FT
-	var to := target.global_position + Vector3(0, 1.15 * target.avatar.scale.x, 0) - target.global_basis.z * 0.35 + lead
-	var dist := from.distance_to(to) / FT
-	var dur := clampf(dist / 45.0, 0.28, 0.8)
-	var apex := maxf(from.y, to.y) + 0.15
-	if f.clip == "bounce_pass":
-		apex = maxf(from.y, to.y) + 0.05
-	_flight = {"kind": "pass", "from": from, "to": to, "apex": apex, "t": 0.0, "dur": dur, "target": target,
-		"bounce": f.clip == "bounce_pass"}
-	holder = null
-	target.look_at_now((f.player as CourtPlayer).pos_ft())
-	target.play("catch")
-
-
 func _nearest_defender(p: CourtPlayer) -> CourtPlayer:
 	var best: CourtPlayer = null
 	var best_d := INF
@@ -394,6 +491,121 @@ func _nearest_defender(p: CourtPlayer) -> CourtPlayer:
 	return best
 
 
+# --- Rebounds and loose balls --------------------------------------------------------------
+
+## Sends everyone after a missed shot or loose ball, and times the best-placed
+## player's rebound jump to the ball's predicted arrival.
+func _plan_rebound(min_time := 0.25) -> void:
+	var c := phys.predict_catch(2.75, min_time, 4.0)
+	if c.is_empty():
+		return
+	var t: float = c[0]
+	var spot: Vector3 = c[1] / FT
+	spot.y = 0.0
+	_rebounder = null
+	var best := INF
+	for p in players:
+		var reb := float(p.data.get("ratings", {}).get("def_reb" if p.team_idx != state.possession else "off_reb", 60))
+		var d := p.pos_ft().distance_to(spot) - reb / 25.0 - _rng.randf_range(0.0, 3.0)
+		if d < best:
+			best = d
+			_rebounder = p
+	for p in players:
+		p.target = spot + Vector3(_rng.randf_range(-5, 5), 0, _rng.randf_range(-5, 5))
+		p.sprinting = true
+	_rebounder.target = spot
+	var grab := AnimLibrary.event_time("rebound", "grab", 0.55)
+	var r := _rebounder
+	get_tree().create_timer(maxf(0.0, t - grab), false, true).timeout.connect(func():
+		if _rebounder == r and phys.active and not r.busy():
+			r.play("rebound"))
+
+
+## Whoever can reach the loose ball takes it.
+func _check_pickups() -> void:
+	var ball_pos := phys.pos
+	var shot_live := not _shot.is_empty() and not phys.touched_rim and not phys.touched_board and phys.bounces == 0
+	for p in players:
+		if p == _thrower and phys.time < 0.4:
+			continue
+		var reach_h := p.avatar.height_m * 1.33 + (0.55 if p.anim.action in ["rebound", "block"] else 0.0)
+		var hand_pt := p.global_position + Vector3(0, minf(ball_pos.y, reach_h), 0)
+		var horiz := Vector2(ball_pos.x - hand_pt.x, ball_pos.z - hand_pt.z).length()
+		if ball_pos.y > reach_h + 0.1 or horiz > 0.75:
+			continue
+		if shot_live and phys.vel.y > -1.0:
+			continue        # no touching a shot on its way up (goaltending comes in Phase 4)
+		if shot_live and ball_pos.y > BallPhysics.RIM_Y - 0.3:
+			continue
+		if not _pass.is_empty():
+			var target: CourtPlayer = _pass.target
+			if p != target:
+				if p.team_idx == target.team_idx or _intercept_rolled.has(p):
+					continue
+				# Only a defender in the lane, away from the passer's hands, gets a chance.
+				var passer: CourtPlayer = _pass.passer
+				if horiz > 0.35 or phys.pos.distance_to(passer.global_position + Vector3(0, 1.2, 0)) < 1.8:
+					continue
+				_intercept_rolled[p] = true
+				if _rng.randf() > 0.03 + float(p.data.get("ratings", {}).get("steal", 60)) / 1500.0:
+					continue
+				announce.emit("INTERCEPTED!")
+		_take_loose_ball(p)
+		return
+
+
+func _take_loose_ball(p: CourtPlayer) -> void:
+	var was_shot := not _shot.is_empty() and (phys.touched_rim or phys.touched_board)
+	var offense := state.possession
+	_shot = {}
+	_give_ball(p)
+	if p.team_idx == offense:
+		if was_shot:
+			state.reset_shot_clock(true)
+			_poss_time = 0.0
+			_shoot_at = _rng.randf_range(3.0, 9.0)
+	else:
+		state.change_possession(p.team_idx)
+		_poss_time = 0.0
+		_next_pass = 1.5
+		_shoot_at = _rng.randf_range(8.0, 15.0)
+		possession_changed.emit(p.team_idx)
+
+
+func _on_score(side: int) -> void:
+	var team := GameState.HOME if attack_side(GameState.HOME) == side else GameState.AWAY
+	var pts := 3 if (not _shot.is_empty() and _shot.side == side and _shot.three) else 2
+	var shooter: CourtPlayer = _shot.get("shooter") if not _shot.is_empty() else null
+	if shooter == null:
+		shooter = team_players(team)[0]
+	state.add_points(team, pts)
+	stats[shooter.data.id].pts += pts
+	shot_made.emit(team, pts, shooter)
+	if not phys.touched_rim and not phys.touched_board and _shot.get("clip", "") == "jumpshot":
+		announce.emit("SWISH")
+	_shot = {}
+	_rebounder = null
+	state.running = false
+	_dead_ball = 1.8
+	if pts == 3:
+		get_tree().create_timer(0.7, false).timeout.connect(func():
+			if not shooter.busy():
+				shooter.play("celebrate"))
+	var next_team := 1 - team
+	get_tree().create_timer(1.9, false).timeout.connect(func(): _start_possession(next_team))
+
+
+func _out_of_bounds() -> void:
+	announce.emit("OUT OF BOUNDS")
+	phys.active = false
+	_shot = {}
+	_pass = {}
+	_dead_ball = 1.4
+	var next_team := 1 - _last_touch if _last_touch >= 0 else 1 - state.possession
+	state.running = false
+	get_tree().create_timer(1.4, false).timeout.connect(func(): _start_possession(next_team))
+
+
 # --- Simulation ---------------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
@@ -403,8 +615,14 @@ func _physics_process(delta: float) -> void:
 	if _dead_ball > 0.0:
 		_dead_ball -= delta
 	_poss_time += delta
+	for k in _contact.keys():
+		_contact[k] -= delta
+		if _contact[k] <= 0.0:
+			_contact.erase(k)
 	_ai()
 	_user_input()
+	if _pending.get("kind", "") == "shot":
+		_update_pending_shot()
 	for p in players:
 		p.defending = p.team_idx != state.possession and _dead_ball <= 0.0
 		p.has_ball = p == holder and _pending.is_empty()
@@ -426,7 +644,7 @@ func _user_input() -> void:
 		right.y = 0.0
 		right = right.normalized()
 		dir = right * mv.x + fwd * -mv.y
-	var any_input := dir != Vector3.ZERO
+	var any_input := dir != Vector3.ZERO or InputRouter.pro_shot_held()
 	for a in ["shoot", "pass", "sprint", "steal", "block", "switch", "pro_left", "pro_right", "pro_up", "pro_down"]:
 		any_input = any_input or Input.is_action_pressed(a)
 	_idle = 0.0 if any_input else _idle + get_physics_process_delta_time()
@@ -438,12 +656,17 @@ func _user_input() -> void:
 	user.sprinting = Input.is_action_pressed("sprint")
 	if user == holder:
 		if Input.is_action_just_pressed("shoot"):
-			try_shoot()
+			try_shoot(true)
+		elif InputRouter.pro_shot_started():
+			try_shoot(true, "jumpshot")
 		elif Input.is_action_just_pressed("pass"):
 			try_pass(dir)
-		for pair in [["pro_left", "left"], ["pro_right", "right"], ["pro_up", "up"], ["pro_down", "down"]]:
-			if Input.is_action_just_pressed(pair[0]):
-				try_move(pair[1])
+		else:
+			var flick := InputRouter.pro_flick()
+			if flick == "up" and _toward_basket(user, dir):
+				try_shoot(false, "finish")
+			elif flick != "":
+				try_move(flick)
 	elif holder and holder.team_idx != user.team_idx:
 		if Input.is_action_just_pressed("steal"):
 			try_steal()
@@ -453,9 +676,19 @@ func _user_input() -> void:
 		try_block()
 
 
+## True when the player is heading at the basket (pro stick "up" = finish).
+func _toward_basket(p: CourtPlayer, dir: Vector3) -> bool:
+	var basket := Vector3(attack_side(p.team_idx) * CourtSpec.basket_x(), 0, 0)
+	var to := basket - p.pos_ft()
+	if to.length() > 16.0:
+		return false
+	var moving := p.velocity.length() > 5.0 and p.velocity.normalized().dot(to.normalized()) > 0.5
+	return moving or (dir.length() > 0.3 and dir.normalized().dot(to.normalized()) > 0.5)
+
+
 func _ai() -> void:
-	if _flight.get("kind", "") == "rebound":
-		return
+	if not _shot.is_empty() or (phys.active and _pass.is_empty()):
+		return        # everyone is chasing the ball (see _plan_rebound)
 	var team := state.possession
 	var side := attack_side(team)
 	var offense := team_players(team)
@@ -471,7 +704,7 @@ func _ai() -> void:
 			# Handler probes toward the basket late in the possession.
 			var drive := clampf((_poss_time - _shoot_at + 4.0) / 4.0, 0.0, 1.0)
 			spot = spot.lerp(basket - Vector3(side * 6.0, 0, 0), drive * 0.8)
-			o.sprinting = drive > 0.5
+			o.sprinting = drive > 0.5 and o.stamina > 0.3
 		else:
 			o.sprinting = false
 		o.target = spot
@@ -487,7 +720,7 @@ func _ai() -> void:
 		if o == holder and not d.user_controlled and not d.busy() and _pending.is_empty() \
 				and d.pos_ft().distance_to(guard) < 4.0 and _rng.randf() < 0.002:
 			try_steal(d)
-	if holder and not holder.user_controlled and _flight.is_empty() and _pending.is_empty() \
+	if holder and not holder.user_controlled and not phys.active and _pending.is_empty() \
 			and _dead_ball <= 0.0 and not holder.busy():
 		if _poss_time > _shoot_at or state.shot_clock < 3.0:
 			try_shoot()
@@ -499,7 +732,8 @@ func _ai() -> void:
 			try_move(["left", "right", "up", "down"][_rng.randi() % 4])
 
 
-## Keeps bodies from overlapping and plays bump reactions on hard contact.
+## Keeps bodies from overlapping, plays bump reactions on hard contact, and
+## slows a driving ball handler who runs into a defender.
 func _collisions(delta: float) -> void:
 	for k in _bump_cooldown.keys():
 		_bump_cooldown[k] -= delta
@@ -515,12 +749,40 @@ func _collisions(delta: float) -> void:
 				continue
 			var n := d / dist
 			var overlap := 2.1 - dist
-			a.set_pos_ft(a.pos_ft() - n * overlap * 0.5)
-			b.set_pos_ft(b.pos_ft() + n * overlap * 0.5)
+			# The bigger, stronger player gives up less ground.
+			var wa := _mass(a)
+			var wb := _mass(b)
+			a.set_pos_ft(a.pos_ft() - n * overlap * wb / (wa + wb))
+			b.set_pos_ft(b.pos_ft() + n * overlap * wa / (wa + wb))
 			var closing := (a.velocity - b.velocity).dot(n)
-			if closing > 11.0 and a.team_idx != b.team_idx and _flight.get("kind", "") != "rebound":
+			if a.team_idx == b.team_idx:
+				continue
+			for pair in [[a, b, n], [b, a, -n]]:
+				var driver: CourtPlayer = pair[0]
+				var wall: CourtPlayer = pair[1]
+				if driver == holder and driver.velocity.length() > 9.0 and driver.velocity.normalized().dot(pair[2]) > 0.6 \
+						and not _contact.has(driver):
+					_drive_contact(driver, wall)
+			if closing > 11.0 and not phys.active:
 				_bump(a, n)
 				_bump(b, -n)
+
+
+func _mass(p: CourtPlayer) -> float:
+	return float(p.data.get("weight_lb", 220)) * (0.7 + float(p.data.get("ratings", {}).get("strength", 60)) / 200.0)
+
+
+func _drive_contact(driver: CourtPlayer, defender: CourtPlayer) -> void:
+	_contact[driver] = 0.7
+	var ratio := _mass(driver) / _mass(defender)
+	driver.velocity *= clampf(0.35 * ratio, 0.2, 0.7)
+	defender.push = driver.velocity.normalized() * 6.0 * ratio
+	if not driver.busy():
+		driver.play("bump_front")
+	if not defender.busy():
+		defender.play("bump_front")
+	if driver == user or defender == user:
+		InputRouter.vibrate(45, 0.7)
 
 
 func _bump(p: CourtPlayer, toward_other: Vector3) -> void:
@@ -541,111 +803,37 @@ func _update_ball(delta: float) -> void:
 	if holder:
 		ball.global_position = holder.hand_position()
 		return
-	if _flight.is_empty():
-		return
-	_flight.t += delta
-	var u := clampf(_flight.t / _flight.dur, 0.0, 1.0)
-	var from: Vector3 = _flight.from
-	var to: Vector3 = _flight.to
-	var pos := from.lerp(to, u)
-	if _flight.get("bounce", false):
-		# Bounce pass: straight to the floor at 60%, then up to the hands.
-		var bp := from.lerp(to, 0.6)
-		bp.y = CourtSpec.BALL_RADIUS * FT
-		pos = from.lerp(bp, u / 0.6) if u < 0.6 else bp.lerp(to, (u - 0.6) / 0.4)
-	else:
-		# Parabola through the apex.
-		var base := lerpf(from.y, to.y, u)
-		var peak: float = _flight.apex - maxf(from.y, to.y)
-		pos.y = base + 4.0 * peak * u * (1.0 - u)
-	ball.global_position = pos
-	if _flight.kind == "pass":
-		(_flight.target as CourtPlayer).anim.reach_for(pos if u > 0.4 else Vector3.INF)
-	if u < 1.0:
-		return
-	match str(_flight.kind):
-		"pass":
-			_give_ball(_flight.target)
-		"shot":
-			_resolve_shot()
-		"rebound":
-			var r: CourtPlayer = _flight.get("rebounder")
+	if not _flight.is_empty():
+		_flight.t += delta
+		var u := clampf(_flight.t / _flight.dur, 0.0, 1.0)
+		ball.global_position = (_flight.from as Vector3).lerp(_flight.to, u)
+		if u >= 1.0:
 			_flight = {}
-			_assign_rebound(r)
-		"drop":
-			_flight = {}
-
-
-func _resolve_shot() -> void:
-	var f := _flight
-	var shooter: CourtPlayer = f.shooter
-	var side := int(f.side)
-	if f.made:
-		var pts := 3 if f.three else 2
-		state.add_points(shooter.team_idx, pts)
-		stats[shooter.data.id].pts += pts
-		shot_made.emit(shooter.team_idx, pts, shooter)
-		var rim := CourtSpec.basket_position(side)
-		_flight = {"kind": "drop", "from": rim, "to": rim - Vector3(0, 9.6, 0) * FT, "apex": rim.y, "t": 0.0, "dur": 0.55}
-		state.running = false
-		_dead_ball = 1.6
-		if pts == 3:
-			get_tree().create_timer(0.7, false).timeout.connect(func():
-				if not shooter.busy():
-					shooter.play("celebrate"))
-		var next_team := 1 - shooter.team_idx
-		get_tree().create_timer(1.8, false).timeout.connect(func(): _start_possession(next_team))
-	else:
-		shot_missed.emit(shooter.team_idx)
-		_start_rebound(ball.global_position, side)
-
-
-func _start_rebound(from: Vector3, side: int) -> void:
-	var basket := CourtSpec.basket_position(side) / FT
-	var ang := _rng.randf_range(-PI * 0.8, PI * 0.8)
-	var dist := _rng.randf_range(5.0, 12.0)
-	var land := Vector3(basket.x - side * cos(ang) * dist, 0, sin(ang) * dist)
-	# Whoever is closest (with a bit of luck) goes up for it; the grab in the
-	# rebound animation lines up with the ball's arrival.
-	var rebounder: CourtPlayer = null
-	var best := INF
-	for p in players:
-		var d := p.pos_ft().distance_to(land) - _rng.randf_range(0.0, 4.0) \
-			- float(p.data.get("ratings", {}).get("def_reb", 60)) / 40.0
-		if d < best:
-			best = d
-			rebounder = p
-	var dur := 0.95
-	_flight = {"kind": "rebound", "from": from, "to": land * FT + Vector3(0, 2.9, 0),
-		"apex": from.y + 2.5 * FT, "t": 0.0, "dur": dur, "rebounder": rebounder}
-	holder = null
-	_pending = {}
-	for p in players:
-		p.target = land + Vector3(_rng.randf_range(-4, 4), 0, _rng.randf_range(-4, 4))
-		p.sprinting = true
-	rebounder.target = land
-	var grab := AnimLibrary.event_time("rebound", "grab", 0.55)
-	get_tree().create_timer(maxf(0.0, dur - grab), false, true).timeout.connect(func():
-		if _flight.get("rebounder") == rebounder and not rebounder.busy():
-			rebounder.play("rebound"))
-
-
-func _assign_rebound(best: CourtPlayer) -> void:
-	if best == null:
-		best = players[0]
-	var offense := state.possession
-	if best.team_idx == offense:
-		state.reset_shot_clock(true)
-		_poss_time = 0.0
-		_shoot_at = _rng.randf_range(4.0, 10.0)
-		_give_ball(best)
-	else:
-		state.change_possession(best.team_idx)
-		_poss_time = 0.0
-		_next_pass = 1.5
-		_shoot_at = _rng.randf_range(8.0, 15.0)
-		_give_ball(best)
-		possession_changed.emit(best.team_idx)
+	if not phys.active:
+		return
+	var was_descending := phys.vel.y < 0.0
+	for ev in phys.step(delta):
+		match ev.type:
+			"score":
+				_on_score(int(ev.side))
+			"rim", "board":
+				if ev.type == "rim" and phys.touched_rim and _rebounder == null and not _shot.is_empty():
+					_plan_rebound(0.05)
+	ball.global_position = phys.pos
+	# Spin the ball mesh with its travel for a bit of life.
+	(ball.get_child(0) as Node3D).rotate_x(-phys.vel.length() * delta * 3.0)
+	if not _pass.is_empty():
+		var target: CourtPlayer = _pass.target
+		target.anim.reach_for(phys.pos if phys.time > 0.12 else Vector3.INF)
+	if absf(phys.pos.x) > (CourtSpec.HALF_LENGTH + 1.0) * FT or absf(phys.pos.z) > (CourtSpec.HALF_WIDTH + 1.0) * FT:
+		if phys.pos.y < 1.2:
+			_out_of_bounds()
+			return
+	if _dead_ball <= 0.0 and phys.active:
+		_check_pickups()
+	# A missed shot that nobody planned for (e.g. a long carom) still gets chased.
+	if _rebounder == null and _pass.is_empty() and was_descending and phys.pos.y < 2.0 and _shot.is_empty() == false:
+		_plan_rebound(0.05)
 
 
 func on_shot_clock_violation() -> void:

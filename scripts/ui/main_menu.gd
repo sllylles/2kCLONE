@@ -142,8 +142,8 @@ func _build_news() -> Control:
 	var v := VBoxContainer.new()
 	p.add_child(v)
 	v.add_child(UIKit.label("WHAT'S NEW", 22, 800, UIKit.ACCENT_2, true))
-	v.add_child(UIKit.label("Phase 2: rigged players with real heights & builds, 40+ animations", 34, 800))
-	v.add_child(UIKit.label("Dribble moves on the swipe zone. Rosters: %s." % DataDB.roster_source, 22, 500, UIKit.TEXT_DIM))
+	v.add_child(UIKit.label("Phase 3: shot meter, real ball physics, pro-stick shooting", 34, 800))
+	v.add_child(UIKit.label("Hold Shoot (or rest a finger in the swipe zone) and let go at the top. Rosters: %s." % DataDB.roster_source, 22, 500, UIKit.TEXT_DIM))
 	var spacer := Control.new()
 	spacer.custom_minimum_size.y = 24
 	var wrap := VBoxContainer.new()

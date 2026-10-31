@@ -2,15 +2,15 @@
 
 Single source of truth for status. Updated at the end of every phase.
 
-**Current build:** v0.3.0, Phases 0–2 done (real teams and rosters, rigged and animated players). **Waiting for device testing before Phase 3.**
+**Current build:** v0.4.0, Phases 0–3 done (real rosters, animated players, shot meter, ball physics). **Waiting for device testing before Phase 4.**
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Foundation | ✅ Done |
 | 1 | Arena & cameras | ✅ Done (placeholder players) |
 | 2 | Players & animation | ✅ Done |
-| 3 | Controls & gameplay feel | ⏭ Next |
-| 4 | Game simulation & AI | Planned |
+| 3 | Controls & gameplay feel | ✅ Done |
+| 4 | Game simulation & AI | ⏭ Next |
 | 5 | Play Now hub | Planned |
 | 6 | MyPlayer builder | Planned |
 | 7 | Career mode | Planned |
@@ -93,10 +93,27 @@ See README, "What to test". Things worth checking on the Pixel 10 Pro:
 - Replays move players along their recorded paths with matching leg motion; shot and dribble actions aren't re-played inside replays yet.
 - Ball flight is still scripted. Physics is Phase 3.
 
-## Phase 3: Controls & gameplay feel
-- [ ] Full touch layout editor (drag buttons), contextual defense actions
-- [ ] Shot meter with a timing window from rating/contest/fatigue/difficulty; meter style; real player %
-- [ ] Physical ball flight, rim and backboard collisions, momentum movement, contact on drives
+## Phase 3: Controls & gameplay feel ✅
+- [x] Touch layout editor (Settings → Controls): drag any button, saved as screen fractions, reset; contextual Block/Steal/Switch on defense; size/opacity; controller support and remapping (from Phase 0)
+- [x] Pro stick: quick swipe/flick = dribble move, resting finger / held right stick = jump shot with the meter, swipe up while driving = layup or dunk
+- [x] Shot meter (`ShotTiming`): hold and release at the top; green window from shot rating, contest (distance, hand up, height), fatigue and difficulty (moving, stepback, floater, layup, dunk); 8 timing grades with feedback; Arc / Bar / Off; "Real player %" mode; AI shooters get rating-based timing
+- [x] Ball physics (`BallPhysics`): gravity, torus rim, glass backboard, floor bounces and rolling, net drag, make detection through the rim plane; aim error from the make roll, biased short/long by early/late timing; bank shots, rim-outs and long rebounds happen naturally
+- [x] Rebounds from predicted ball flight (best-placed player times the jump); loose-ball pickups by reach; pass interceptions in the lane; out of bounds with last touch
+- [x] Momentum movement: acceleration limits plus limited turning at sprint speed; speed rating; stamina (drains sprinting, recovers standing) affecting speed and shot window; ring under your player shows fatigue
+- [x] Contact on drives: running into a defender slows the driver (by weight and strength), bumps both, and contests the next shot
+- [x] Tests: 69 passing (adds shot timing, ball physics calibration, pro-stick gestures)
+
+### How to test Phase 3
+1. Quick Game: get the ball, hold SHOOT, release at the top. Try early, late, contested, after a sprint, off a stepback.
+2. Try the pro stick: rest a finger in the swipe zone to shoot; swipe up while driving for a layup/dunk.
+3. Settings → Gameplay: switch the meter to Bar / Off and try "Real player %".
+4. Settings → Controls → Edit touch layout: move the buttons, play a game, check they stay put.
+5. Watch the ball: rim-outs, bank shots, long rebounds, passes picked off.
+
+### Known limitations
+- No fouls, free throws or goaltending calls yet (contact affects the shot but isn't whistled). That's Phase 4.
+- The ball doesn't collide with players' bodies (only hands that reach it); blocks still decide outcomes through the block roll.
+- Team AI is still the simple demo offense. Real plays and defense are Phase 4.
 
 ## Phase 4: Game simulation & AI
 - [ ] Full rules: 24 s / 8 s / 3 s, fouls and free throws, bonus, goaltending, out of bounds, timeouts

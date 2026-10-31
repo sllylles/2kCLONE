@@ -1,0 +1,66 @@
+name: Test & build Android APK
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot + export templates
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-android
+
+      - name: Download Godot and Android templates
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          curl -sSL -o godot.zip $base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          unzip -q godot.zip -d ~/godot && mv ~/godot/Godot_v* ~/godot/godot
+          curl -sSL -o tpl.tpz $base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          T=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p $T
+          unzip -q -j tpl.tpz templates/android_debug.apk templates/android_release.apk templates/version.txt -d $T
+          rm godot.zip tpl.tpz
+
+      - name: Import project
+        run: ~/godot/godot --headless --path . --import || true
+
+      - name: Check scripts compile
+        run: ~/godot/godot --headless --path . -s res://tools/check_scripts.gd
+
+      - name: Unit tests (GUT)
+        run: ~/godot/godot --headless --path . -s addons/gut/gut_cmdln.gd -gdir=res://tests/unit -gexit
+
+      - name: Smoke test the arena scene
+        run: |
+          ~/godot/godot --headless --path . res://scenes/arena_game.tscn --quit-after 1200 2>&1 | tee smoke.log
+          ! grep -E "SCRIPT ERROR|Parse Error" smoke.log
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build debug APK
+        run: GODOT=~/godot/godot ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT tools/build_android.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: courtside-debug-apk
+          path: build/android/courtside-debug.apk
+          retention-days: 30

@@ -1,0 +1,13 @@
+{
+  "_doc": "Teams are fully data-driven. 'logo' may point to a PNG (res://data/logos/x.png or user://data/logos/x.png); when empty a badge is generated from the colors and abbreviation. Colors are hex.",
+  "teams": [
+    {"id": "HCH", "city": "Harbor City", "name": "Hammerheads", "abbr": "HCH", "primary": "#0E3B5C", "secondary": "#F2A541", "accent": "#FFFFFF", "arena": "harbor_dome", "logo": "", "court": {"paint": "#0E3B5C", "apron": "#0B2E48", "stain": 0.0}},
+    {"id": "MSD", "city": "Mesa", "name": "Sun Dogs", "abbr": "MSD", "primary": "#D9480F", "secondary": "#2B2D42", "accent": "#FFD166", "arena": "mesa_pavilion", "logo": "", "court": {"paint": "#D9480F", "apron": "#2B2D42", "stain": 0.15}},
+    {"id": "NGL", "city": "Northgate", "name": "Lumberjacks", "abbr": "NGL", "primary": "#1B4D3E", "secondary": "#E8C547", "accent": "#FFFFFF", "arena": "northgate_arena", "logo": "", "court": {"paint": "#1B4D3E", "apron": "#153B30", "stain": 0.05}},
+    {"id": "RVM", "city": "Riverside", "name": "Monarchs", "abbr": "RVM", "primary": "#4B2E83", "secondary": "#B7A57A", "accent": "#FFFFFF", "arena": "riverside_center", "logo": "", "court": {"paint": "#4B2E83", "apron": "#36215E", "stain": 0.1}},
+    {"id": "CAP", "city": "Capital", "name": "Comets", "abbr": "CAP", "primary": "#1D3557", "secondary": "#E63946", "accent": "#F1FAEE", "arena": "capital_garden", "logo": "", "court": {"paint": "#E63946", "apron": "#1D3557", "stain": 0.0}},
+    {"id": "BYG", "city": "Bayou", "name": "Gators", "abbr": "BYG", "primary": "#2D6A4F", "secondary": "#95D5B2", "accent": "#081C15", "arena": "bayou_hall", "logo": "", "court": {"paint": "#2D6A4F", "apron": "#1B4332", "stain": 0.2}},
+    {"id": "SUM", "city": "Summit", "name": "Peaks", "abbr": "SUM", "primary": "#2667FF", "secondary": "#8ECAE6", "accent": "#FFFFFF", "arena": "summit_center", "logo": "", "court": {"paint": "#2667FF", "apron": "#1A4BC0", "stain": -0.05}},
+    {"id": "SCF", "city": "Steel City", "name": "Forge", "abbr": "SCF", "primary": "#212529", "secondary": "#FFB703", "accent": "#FFFFFF", "arena": "foundry", "logo": "", "court": {"paint": "#FFB703", "apron": "#212529", "stain": 0.1}}
+  ]
+}

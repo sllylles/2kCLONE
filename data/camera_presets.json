@@ -1,0 +1,11 @@
+{
+  "_doc": "Gameplay cameras. Distances/heights in feet; each pair is [slider 0, slider 10]. zoom slider maps distance and fov from wide (0) to tight (10). track = how much the camera slides along the sideline with the ball (0-1).",
+  "presets": [
+    {"id": "broadcast", "name": "Broadcast", "type": "sideline", "height": [18, 40], "distance": [88, 52], "fov": [40, 28], "track": 0.80, "look_height": 2.0, "lead": 4.0, "smooth": 3.5},
+    {"id": "elevated", "name": "Elevated Sideline", "type": "sideline", "height": [30, 52], "distance": [70, 40], "fov": [46, 34], "track": 0.65, "look_height": 0.0, "lead": 7.0, "smooth": 3.0},
+    {"id": "drive", "name": "Drive", "type": "drive", "height": [8, 20], "distance": [30, 16], "fov": [62, 50], "track": 1.0, "look_height": 4.0, "lead": 12.0, "smooth": 4.5},
+    {"id": "side_court", "name": "Side Court", "type": "sideline", "height": [6, 15], "distance": [52, 34], "fov": [48, 36], "track": 1.0, "look_height": 4.5, "lead": 3.0, "smooth": 4.0},
+    {"id": "end_court", "name": "End Court", "type": "end", "height": [14, 34], "distance": [30, 12], "fov": [58, 46], "track": 0.5, "look_height": 2.0, "lead": 0.0, "smooth": 3.0},
+    {"id": "skybox", "name": "Skybox", "type": "sideline", "height": [75, 115], "distance": [70, 40], "fov": [46, 34], "track": 0.5, "look_height": 0.0, "lead": 0.0, "smooth": 2.5}
+  ]
+}

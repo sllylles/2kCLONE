@@ -222,7 +222,7 @@ func _build_name_card() -> void:
 
 
 func show_player_card(player: Dictionary, team: Dictionary, stat_line: String) -> void:
-	_card_number.text = PlaceholderPlayer._jersey(player)
+	_card_number.text = PlayerAvatar.jersey_number(player)
 	_card_name.text = ("%s %s" % [player.get("first", ""), player.get("last", "")]).to_upper()
 	var ht := int(player.get("height_in", 78))
 	_card_line.text = "%s  •  %d'%d\"  •  %s    %s" % [player.get("pos", ""), ht / 12, ht % 12, team.abbr, stat_line]

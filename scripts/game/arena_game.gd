@@ -20,6 +20,7 @@ var _excitement := 0.25
 var _last_card_ms := -100000
 var _jumbo_accum := 0.0
 var _in_replay := false
+var _replay_last := {}
 
 
 func _ready() -> void:
@@ -110,7 +111,7 @@ func _on_possession_changed(team: int) -> void:
 	director.drive_subject = sim.user
 
 
-func _on_handler_changed(p: PlaceholderPlayer) -> void:
+func _on_handler_changed(p: CourtPlayer) -> void:
 	director.drive_subject = sim.user
 	var now := Time.get_ticks_msec()
 	if now - _last_card_ms > 9000 and director.mode == CameraDirector.Mode.LIVE:
@@ -118,7 +119,7 @@ func _on_handler_changed(p: PlaceholderPlayer) -> void:
 		hud.show_player_card(p.data, home if p.team_idx == GameState.HOME else away, sim.stat_line(p))
 
 
-func _on_shot_made(team: int, points: int, shooter: PlaceholderPlayer) -> void:
+func _on_shot_made(team: int, points: int, shooter: CourtPlayer) -> void:
 	court.swish(sim.attack_side(team))
 	_excitement = 1.0 if team == GameState.HOME else 0.5
 	if points == 3:
@@ -155,6 +156,12 @@ func _on_replay_finished() -> void:
 
 
 func _process(delta: float) -> void:
+	if _in_replay and delta > 0.0:
+		# Drive the legs from the replayed movement so players don't skate.
+		for p in sim.players:
+			var last: Vector3 = _replay_last.get(p, p.global_position)
+			p.anim.velocity = (p.global_position - last) / delta
+			_replay_last[p] = p.global_position
 	var live := director.mode == CameraDirector.Mode.LIVE and not get_tree().paused
 	touch.visible = live and InputRouter.touch_controls_visible()
 	# Crowd energy decays back to a murmur; louder late in close games.

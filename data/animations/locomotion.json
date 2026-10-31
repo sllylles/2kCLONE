@@ -1,0 +1,141 @@
+{
+ "_doc": "Locomotion and stances. Angles in degrees, see scripts/player/anim_library.gd for the joint terms. Cycles are in place; the game moves the player.",
+ "poses": {
+  "stand": {
+   "spine_01": {"bend": 3}, "neck_01": {"bend": -2},
+   "upperarm_l": {"side": 9, "fwd": 4}, "upperarm_r": {"side": 9, "fwd": 4},
+   "lowerarm_l": {"bend": 18}, "lowerarm_r": {"bend": 18},
+   "fingers_l": {"curl": 25}, "fingers_r": {"curl": 25},
+   "thigh_l": {"side": 4, "fwd": 3}, "thigh_r": {"side": 4, "fwd": 3},
+   "calf_l": {"bend": 6}, "calf_r": {"bend": 6}, "foot_l": {"bend": 3}, "foot_r": {"bend": 3}
+  },
+  "athletic": {
+   "hips": [0, -0.08, 0],
+   "spine_01": {"bend": 12}, "spine_02": {"bend": 5}, "neck_01": {"bend": -12},
+   "upperarm_l": {"side": 18, "fwd": 22}, "upperarm_r": {"side": 18, "fwd": 22},
+   "lowerarm_l": {"bend": 65}, "lowerarm_r": {"bend": 65},
+   "fingers_l": {"curl": 20}, "fingers_r": {"curl": 20},
+   "thigh_l": {"side": 9, "fwd": 26}, "thigh_r": {"side": 9, "fwd": 26},
+   "calf_l": {"bend": 42}, "calf_r": {"bend": 42}, "foot_l": {"bend": 16}, "foot_r": {"bend": 16}
+  },
+  "defense": {
+   "hips": [0, -0.22, 0.03],
+   "spine_01": {"bend": 20}, "spine_02": {"bend": 8}, "neck_01": {"bend": -22},
+   "clavicle_l": {"up": 6}, "clavicle_r": {"up": 6},
+   "upperarm_l": {"side": 55, "fwd": 25}, "upperarm_r": {"side": 55, "fwd": 25},
+   "lowerarm_l": {"bend": 45}, "lowerarm_r": {"bend": 45},
+   "hand_l": {"bend": 10}, "hand_r": {"bend": 10},
+   "fingers_l": {"curl": 10}, "fingers_r": {"curl": 10},
+   "thigh_l": {"side": 17, "fwd": 42}, "thigh_r": {"side": 17, "fwd": 42},
+   "calf_l": {"bend": 72}, "calf_r": {"bend": 72}, "foot_l": {"bend": 30}, "foot_r": {"bend": 30}
+  },
+  "jog_contact_r": {
+   "hips": [0, -0.035, 0],
+   "spine_01": {"bend": 9, "twist": -6}, "neck_01": {"bend": -6, "twist": 6},
+   "upperarm_l": {"side": 10, "fwd": 32}, "upperarm_r": {"side": 10, "fwd": -28},
+   "lowerarm_l": {"bend": 95}, "lowerarm_r": {"bend": 80},
+   "fingers_l": {"curl": 45}, "fingers_r": {"curl": 45},
+   "thigh_r": {"fwd": 32}, "calf_r": {"bend": 12}, "foot_r": {"bend": 12},
+   "thigh_l": {"fwd": -18}, "calf_l": {"bend": 45}, "foot_l": {"bend": -15}
+  },
+  "jog_pass_r": {
+   "hips": [0, 0.02, 0],
+   "spine_01": {"bend": 9, "twist": 0}, "neck_01": {"bend": -6},
+   "upperarm_l": {"side": 10, "fwd": 5}, "upperarm_r": {"side": 10, "fwd": 2},
+   "lowerarm_l": {"bend": 88}, "lowerarm_r": {"bend": 88},
+   "fingers_l": {"curl": 45}, "fingers_r": {"curl": 45},
+   "thigh_r": {"fwd": 4}, "calf_r": {"bend": 22}, "foot_r": {"bend": 10},
+   "thigh_l": {"fwd": 40}, "calf_l": {"bend": 95}, "foot_l": {"bend": 5}
+  },
+  "sprint_contact_r": {
+   "hips": [0, -0.05, 0],
+   "spine_01": {"bend": 17, "twist": -10}, "spine_02": {"bend": 4}, "neck_01": {"bend": -16, "twist": 10},
+   "upperarm_l": {"side": 8, "fwd": 55}, "upperarm_r": {"side": 8, "fwd": -45},
+   "lowerarm_l": {"bend": 95}, "lowerarm_r": {"bend": 70},
+   "fingers_l": {"curl": 40}, "fingers_r": {"curl": 40},
+   "thigh_r": {"fwd": 42}, "calf_r": {"bend": 18}, "foot_r": {"bend": 8},
+   "thigh_l": {"fwd": -28}, "calf_l": {"bend": 70}, "foot_l": {"bend": -25}
+  },
+  "sprint_pass_r": {
+   "hips": [0, 0.04, 0],
+   "spine_01": {"bend": 17}, "spine_02": {"bend": 4}, "neck_01": {"bend": -16},
+   "upperarm_l": {"side": 8, "fwd": 10}, "upperarm_r": {"side": 8, "fwd": 5},
+   "lowerarm_l": {"bend": 90}, "lowerarm_r": {"bend": 90},
+   "fingers_l": {"curl": 40}, "fingers_r": {"curl": 40},
+   "thigh_r": {"fwd": 0}, "calf_r": {"bend": 35}, "foot_r": {"bend": -5},
+   "thigh_l": {"fwd": 62}, "calf_l": {"bend": 115}, "foot_l": {"bend": 10}
+  },
+  "shuffle_l_open": {
+   "pose": "athletic", "hips": [0, -0.1, 0],
+   "thigh_l": {"side": 26, "fwd": 24}, "thigh_r": {"side": 6, "fwd": 26},
+   "calf_l": {"bend": 38}, "calf_r": {"bend": 46}, "foot_l": {"bend": 14}, "foot_r": {"bend": 18}
+  },
+  "shuffle_l_close": {
+   "pose": "athletic", "hips": [0, -0.06, 0],
+   "thigh_l": {"side": 10, "fwd": 26}, "thigh_r": {"side": 2, "fwd": 22},
+   "calf_l": {"bend": 40}, "calf_r": {"bend": 52}, "foot_l": {"bend": 15}, "foot_r": {"bend": 25}
+  },
+  "slide_l_open": {
+   "pose": "defense", "hips": [0, -0.25, 0.03],
+   "thigh_l": {"side": 32, "fwd": 40}, "thigh_r": {"side": 12, "fwd": 42},
+   "calf_l": {"bend": 68}, "calf_r": {"bend": 75}
+  },
+  "slide_l_close": {
+   "pose": "defense", "hips": [0, -0.2, 0.03],
+   "thigh_l": {"side": 16, "fwd": 42}, "thigh_r": {"side": 8, "fwd": 38},
+   "calf_l": {"bend": 72}, "calf_r": {"bend": 80}, "foot_r": {"bend": 38}
+  },
+  "back_step_r": {
+   "pose": "athletic", "hips": [0, -0.07, 0],
+   "spine_01": {"bend": 6},
+   "thigh_r": {"fwd": -12}, "calf_r": {"bend": 30}, "foot_r": {"bend": -10},
+   "thigh_l": {"fwd": 30}, "calf_l": {"bend": 50}, "foot_l": {"bend": 15}
+  }
+ },
+ "clips": {
+  "idle": {"length": 3.0, "loop": true, "base": "stand", "keys": [
+   [0.0, {}],
+   [1.5, {"spine_01": {"bend": 5}, "spine_02": {"bend": 1}, "upperarm_l": {"side": 10, "fwd": 6}, "upperarm_r": {"side": 10, "fwd": 6}, "head": {"twist": 4}}],
+   [3.0, {}]]},
+  "idle_athletic": {"length": 2.0, "loop": true, "base": "athletic", "keys": [
+   [0.0, {}],
+   [1.0, {"hips": [0, -0.095, 0], "spine_01": {"bend": 14}}],
+   [2.0, {}]]},
+  "jog": {"length": 0.72, "loop": true, "keys": [
+   [0.0, {"pose": "jog_contact_r"}],
+   [0.18, {"pose": "jog_pass_r"}],
+   [0.36, {"mirror": "jog_contact_r"}],
+   [0.54, {"mirror": "jog_pass_r"}],
+   [0.72, {"pose": "jog_contact_r"}]]},
+  "sprint": {"length": 0.56, "loop": true, "keys": [
+   [0.0, {"pose": "sprint_contact_r"}],
+   [0.14, {"pose": "sprint_pass_r"}],
+   [0.28, {"mirror": "sprint_contact_r"}],
+   [0.42, {"mirror": "sprint_pass_r"}],
+   [0.56, {"pose": "sprint_contact_r"}]]},
+  "strafe_l": {"length": 0.6, "loop": true, "keys": [
+   [0.0, {"pose": "shuffle_l_close"}],
+   [0.3, {"pose": "shuffle_l_open"}],
+   [0.6, {"pose": "shuffle_l_close"}]]},
+  "strafe_r": {"mirror_of": "strafe_l"},
+  "backpedal": {"length": 0.7, "loop": true, "keys": [
+   [0.0, {"pose": "back_step_r"}],
+   [0.35, {"mirror": "back_step_r"}],
+   [0.7, {"pose": "back_step_r"}]]},
+  "def_idle": {"length": 1.2, "loop": true, "base": "defense", "keys": [
+   [0.0, {}],
+   [0.3, {"upperarm_l": {"side": 62, "fwd": 30}, "lowerarm_l": {"bend": 35}, "hand_l": {"bend": 25}}],
+   [0.6, {"hips": [0, -0.235, 0.03]}],
+   [0.9, {"upperarm_r": {"side": 62, "fwd": 30}, "lowerarm_r": {"bend": 35}, "hand_r": {"bend": 25}}],
+   [1.2, {}]]},
+  "def_slide_l": {"length": 0.5, "loop": true, "keys": [
+   [0.0, {"pose": "slide_l_close"}],
+   [0.25, {"pose": "slide_l_open"}],
+   [0.5, {"pose": "slide_l_close"}]]},
+  "def_slide_r": {"mirror_of": "def_slide_l"},
+  "def_back": {"length": 0.6, "loop": true, "base": "defense", "keys": [
+   [0.0, {"thigh_r": {"fwd": 30, "side": 15}, "calf_r": {"bend": 60}, "thigh_l": {"fwd": 50}, "calf_l": {"bend": 85}}],
+   [0.3, {"thigh_l": {"fwd": 30, "side": 15}, "calf_l": {"bend": 60}, "thigh_r": {"fwd": 50}, "calf_r": {"bend": 85}}],
+   [0.6, {"thigh_r": {"fwd": 30, "side": 15}, "calf_r": {"bend": 60}, "thigh_l": {"fwd": 50}, "calf_l": {"bend": 85}}]]}
+ }
+}

@@ -1,0 +1,6 @@
+{
+ "_doc": "Per-player looks, keyed by full name exactly as in players.json. Merged into players.json by tools/build_rosters.py (also in CI). Fields: skin (hex), hair (folder in hair/ or 'none'), hair_color (hex), face {blend shape: 0..1} — names in assets/players/player_meta.json. Players not listed get a neutral look with a stable variation.",
+ "players": {
+  "Example Player": {"skin": "#8D5524", "hair": "short02", "hair_color": "#1B1410", "face": {"jaw_wide": 0.4, "nose_wide": 0.3}}
+ }
+}

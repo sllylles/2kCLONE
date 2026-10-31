@@ -1,0 +1,122 @@
+{
+ "_doc": "Dribbling and dribble moves. Ball events (seconds): bounce = ball hits the floor at bounce_at (meters, character space: +x right, -z forward), catch = ball reaches the hand named in to_hand, hold = [start, end] ball stays in the hand. Moves are in place; the game applies the travel.",
+ "poses": {
+  "dribble_top_r": {
+   "pose": "athletic",
+   "spine_01": {"bend": 15, "twist": 6}, "spine_02": {"bend": 6},
+   "upperarm_r": {"side": 22, "fwd": 18}, "lowerarm_r": {"bend": 68}, "hand_r": {"bend": -20},
+   "fingers_r": {"curl": 15},
+   "upperarm_l": {"side": 30, "fwd": 42}, "lowerarm_l": {"bend": 85}, "hand_l": {"bend": 10}
+  },
+  "dribble_push_r": {
+   "pose": "dribble_top_r",
+   "upperarm_r": {"side": 20, "fwd": 10}, "lowerarm_r": {"bend": 25}, "hand_r": {"bend": 35}
+  },
+  "dribble_low_r": {
+   "pose": "dribble_top_r",
+   "upperarm_r": {"side": 18, "fwd": 8}, "lowerarm_r": {"bend": 35}, "hand_r": {"bend": 10}
+  },
+  "gather": {
+   "pose": "athletic", "hips": [0, -0.1, 0],
+   "spine_01": {"bend": 14},
+   "upperarm_l": {"side": 18, "fwd": 40}, "upperarm_r": {"side": 18, "fwd": 40},
+   "lowerarm_l": {"bend": 100}, "lowerarm_r": {"bend": 100},
+   "hand_l": {"side": 10}, "hand_r": {"side": 10},
+   "fingers_l": {"curl": 15}, "fingers_r": {"curl": 15}
+  },
+  "triple_threat": {
+   "pose": "athletic", "hips": [0, -0.1, 0],
+   "spine_01": {"bend": 16, "twist": -12},
+   "upperarm_r": {"side": 20, "fwd": 20}, "upperarm_l": {"side": 10, "fwd": 45},
+   "lowerarm_r": {"bend": 95}, "lowerarm_l": {"bend": 95},
+   "fingers_l": {"curl": 15}, "fingers_r": {"curl": 15}
+  }
+ },
+ "clips": {
+  "dribble_r": {"length": 0.5, "loop": true,
+   "events": {"bounce": 0.25, "hand": "r"},
+   "keys": [
+    [0.0, {"pose": "dribble_top_r"}],
+    [0.12, {"pose": "dribble_push_r"}],
+    [0.25, {"pose": "dribble_low_r"}],
+    [0.38, {"pose": "dribble_low_r", "lowerarm_r": {"bend": 55}, "hand_r": {"bend": -5}}],
+    [0.5, {"pose": "dribble_top_r"}]]},
+  "dribble_l": {"mirror_of": "dribble_r", "events": {"bounce": 0.25, "hand": "l"}},
+  "dribble_run_r": {"length": 0.36, "loop": true,
+   "events": {"bounce": 0.18, "hand": "r"},
+   "keys": [
+    [0.0, {"pose": "dribble_top_r", "upperarm_r": {"fwd": 30}}],
+    [0.09, {"pose": "dribble_push_r", "upperarm_r": {"fwd": 25}}],
+    [0.18, {"pose": "dribble_low_r", "upperarm_r": {"fwd": 22}}],
+    [0.36, {"pose": "dribble_top_r", "upperarm_r": {"fwd": 30}}]]},
+  "dribble_run_l": {"mirror_of": "dribble_run_r", "events": {"bounce": 0.18, "hand": "l"}},
+  "triple_threat": {"length": 1.6, "loop": true, "base": "triple_threat",
+   "events": {"hold": [0, 1.6], "hand": "both"},
+   "keys": [[0.0, {}], [0.8, {"spine_01": {"bend": 18, "twist": -14}}], [1.6, {}]]},
+  "crossover_rl": {"length": 0.55,
+   "events": {"bounce": 0.22, "bounce_at": [0.0, 0, -0.32], "to_hand": "l", "catch": 0.4},
+   "keys": [
+    [0.0, {"pose": "dribble_top_r"}],
+    [0.1, {"pose": "dribble_push_r", "hips": [0.06, -0.12, 0], "spine_01": {"bend": 18, "side": 8, "twist": 12},
+           "thigh_r": {"side": 22}, "upperarm_r": {"side": 5, "fwd": 22}, "lowerarm_r": {"bend": 30}, "hand_r": {"side": -30}}],
+    [0.25, {"pose": "athletic", "hips": [0, -0.13, 0], "spine_01": {"bend": 18},
+            "upperarm_r": {"side": 25, "fwd": 30}, "lowerarm_r": {"bend": 70}, "upperarm_l": {"side": 15, "fwd": 15}, "lowerarm_l": {"bend": 40}}],
+    [0.4, {"mirror": "dribble_low_r", "hips": [-0.06, -0.12, 0], "spine_01": {"bend": 18, "side": -6, "twist": -10}, "thigh_l": {"side": 22}}],
+    [0.55, {"mirror": "dribble_top_r"}]]},
+  "crossover_lr": {"mirror_of": "crossover_rl", "events": {"bounce": 0.22, "bounce_at": [0.0, 0, -0.32], "to_hand": "r", "catch": 0.4}},
+  "between_legs_rl": {"length": 0.6,
+   "events": {"bounce": 0.25, "bounce_at": [0.0, 0, -0.05], "to_hand": "l", "catch": 0.45},
+   "keys": [
+    [0.0, {"pose": "dribble_top_r"}],
+    [0.12, {"pose": "athletic", "hips": [0, -0.2, 0], "spine_01": {"bend": 22},
+            "thigh_l": {"fwd": 48, "side": 18}, "calf_l": {"bend": 70}, "thigh_r": {"fwd": 0, "side": 18}, "calf_r": {"bend": 55},
+            "upperarm_r": {"side": 15, "fwd": 10}, "lowerarm_r": {"bend": 30}, "hand_r": {"bend": 30, "side": -25}}],
+    [0.3, {"pose": "athletic", "hips": [0, -0.22, 0], "spine_01": {"bend": 22},
+           "thigh_l": {"fwd": 48, "side": 18}, "calf_l": {"bend": 72}, "thigh_r": {"fwd": 0, "side": 18}, "calf_r": {"bend": 58},
+           "upperarm_l": {"side": 12, "fwd": 5}, "lowerarm_l": {"bend": 30}}],
+    [0.45, {"mirror": "dribble_low_r", "hips": [0, -0.15, 0]}],
+    [0.6, {"mirror": "dribble_top_r"}]]},
+  "between_legs_lr": {"mirror_of": "between_legs_rl", "events": {"bounce": 0.25, "bounce_at": [0.0, 0, -0.05], "to_hand": "r", "catch": 0.45}},
+  "behind_back_rl": {"length": 0.6,
+   "events": {"bounce": 0.27, "bounce_at": [-0.05, 0, 0.32], "to_hand": "l", "catch": 0.45},
+   "keys": [
+    [0.0, {"pose": "dribble_top_r"}],
+    [0.15, {"pose": "dribble_top_r", "spine_01": {"bend": 14, "twist": -18},
+            "upperarm_r": {"side": 18, "fwd": -35, "twist": 30}, "lowerarm_r": {"bend": 70}, "hand_r": {"bend": 20}}],
+    [0.3, {"pose": "athletic", "spine_01": {"bend": 14, "twist": -8},
+           "upperarm_r": {"side": 25, "fwd": -45}, "lowerarm_r": {"bend": 40},
+           "upperarm_l": {"side": 20, "fwd": 10}, "lowerarm_l": {"bend": 40}}],
+    [0.45, {"mirror": "dribble_low_r"}],
+    [0.6, {"mirror": "dribble_top_r"}]]},
+  "behind_back_lr": {"mirror_of": "behind_back_rl", "events": {"bounce": 0.27, "bounce_at": [0.05, 0, 0.32], "to_hand": "r", "catch": 0.45}},
+  "spin_r": {"length": 0.75,
+   "events": {"hold": [0.05, 0.6], "hand": "r", "bounce": 0.68},
+   "keys": [
+    [0.0, {"pose": "dribble_top_r"}],
+    [0.15, {"pose": "dribble_top_r", "turn": -90, "hips": [0, -0.14, 0], "spine_01": {"bend": 20},
+            "upperarm_r": {"side": 35, "fwd": 20}, "lowerarm_r": {"bend": 80}, "upperarm_l": {"side": 50, "fwd": 20}, "lowerarm_l": {"bend": 60}}],
+    [0.35, {"pose": "dribble_top_r", "turn": -200, "hips": [0, -0.12, 0], "spine_01": {"bend": 15},
+            "upperarm_r": {"side": 40, "fwd": 10}, "lowerarm_r": {"bend": 70}}],
+    [0.55, {"pose": "dribble_top_r", "turn": -300, "hips": [0, -0.1, 0]}],
+    [0.75, {"pose": "dribble_top_r", "turn": -360}]]},
+  "spin_l": {"mirror_of": "spin_r", "events": {"hold": [0.05, 0.6], "hand": "l", "bounce": 0.68}},
+  "hesitation": {"length": 0.7,
+   "events": {"bounce": 0.35, "hand": "r"},
+   "keys": [
+    [0.0, {"pose": "dribble_top_r"}],
+    [0.2, {"pose": "dribble_push_r", "hips": [0, -0.02, 0], "spine_01": {"bend": 4}, "neck_01": {"bend": -2}, "head": {"bend": -6},
+           "thigh_l": {"fwd": 10}, "calf_l": {"bend": 15}, "thigh_r": {"fwd": 10}, "calf_r": {"bend": 15}}],
+    [0.45, {"pose": "dribble_low_r", "hips": [0, -0.12, -0.03], "spine_01": {"bend": 20}}],
+    [0.7, {"pose": "dribble_top_r"}]]},
+  "stepback": {"length": 0.65,
+   "events": {"gather": 0.4, "hand": "both"},
+   "keys": [
+    [0.0, {"pose": "dribble_top_r"}],
+    [0.15, {"pose": "dribble_push_r", "hips": [0, -0.14, -0.05], "spine_01": {"bend": 22},
+            "thigh_l": {"fwd": 45}, "calf_l": {"bend": 60}}],
+    [0.32, {"pose": "gather", "hips": [0, -0.02, 0.06], "spine_01": {"bend": 8},
+            "thigh_l": {"fwd": 30}, "calf_l": {"bend": 70}, "thigh_r": {"fwd": 15}, "calf_r": {"bend": 50}, "foot_l": {"bend": -20}, "foot_r": {"bend": -20}}],
+    [0.5, {"pose": "gather", "hips": [0, -0.14, 0]}],
+    [0.65, {"pose": "gather"}]]}
+ }
+}

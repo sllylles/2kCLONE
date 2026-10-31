@@ -2,14 +2,14 @@
 
 Single source of truth for status. Updated at the end of every phase.
 
-**Current build:** v0.2.0, Phase 0 + Phase 1 done, with real teams, rosters and logos. **Waiting for device testing before Phase 2.**
+**Current build:** v0.3.0, Phases 0–2 done (real teams and rosters, rigged and animated players). **Waiting for device testing before Phase 3.**
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Foundation | ✅ Done |
 | 1 | Arena & cameras | ✅ Done (placeholder players) |
-| 2 | Players & animation | ⏭ Next |
-| 3 | Controls & gameplay feel | Planned |
+| 2 | Players & animation | ✅ Done |
+| 3 | Controls & gameplay feel | ⏭ Next |
 | 4 | Game simulation & AI | Planned |
 | 5 | Play Now hub | Planned |
 | 6 | MyPlayer builder | Planned |
@@ -65,14 +65,33 @@ See README, "What to test". Things worth checking on the Pixel 10 Pro:
 - [ ] Ratings are rough: star overalls are hand-set and everyone else is estimated from experience. Stat-based ratings come in Phase 4.
 - [ ] Player appearance (skin, hair, faces) stays neutral until the Phase 2/6 appearance system; it will be editable per player
 
-## Phase 2: Players & animation ⏭ Next
-- [ ] Blender + MPFB2 headless scripts in `tools/blender/` (see `docs/ART_PIPELINE.md`)
-- [ ] Shared humanoid skeleton; body blend shapes for height/weight/wingspan/muscle; 2 LODs; glTF export
-- [ ] Preset heads + face sliders; hair from `/hair`, eyes from `/eyes`; one uniform mesh with color/number shader
-- [ ] Locomotion blend spaces (idle/jog/sprint/strafe/backpedal) via AnimationTree
-- [ ] Dribble moves, jump shots, layups, floaters, dunks, passes, rebounds, blocks, steals, defensive slides, bumps
-- [ ] Foot IK and ball-hand IK
-- [ ] Animation sources: CC0 only (approved), e.g. Quaternius and Kenney; every set logged in CREDITS.md
+## Phase 2: Players & animation ✅
+- [x] Blender/MPFB2 pipeline (`tools/blender/build_player.py`, headless): CC0 MakeHuman base athlete at 6'7", shared 53-bone `game_engine` skeleton, glTF export ([docs/ART_PIPELINE.md](docs/ART_PIPELINE.md))
+- [x] Body build blend shapes (heavy/light/muscular/slim) driven by roster weight, height and strength; height scales the model; wingspan lengthens the arm bones
+- [x] 16 face sliders + 3 ancestry face blends, stable per-player variation, editable per player in `data/appearance.json`
+- [x] Hair from `/hair` (10 styles) and eyes from `/eyes`, fitted with MPFB2's .mhclo fitting
+- [x] Generated jersey, shorts and high-top shoes that share the body's skin weights and blend shapes; uniform shader with team colors, trim, team name and front/back numbers ("0" vs "00" kept)
+- [x] Body ~18.8k triangles (skin under the uniform removed), ~28–35k per dressed player; Godot auto-LODs
+- [x] 40+ original animations as editable JSON poses (`data/animations`): idle, athletic stance, jog, sprint, strafes, backpedal, defensive stance, slides and backpedal, dribbles (standing and running, both hands), triple threat, crossover, between the legs, behind the back, spin, hesitation, stepback, jump shot, layup, floater, dunk, chest and bounce pass, catch, rebound, block, contest, steal, three bumps, celebration
+- [x] AnimationTree per player: offense and defense locomotion blend spaces with speed matching, upper-body dribble layer phase-locked to the ball, one-shot actions with event timing (release, gather, grab, reach, land)
+- [x] Ball handling: the ball rides the dribbling hand and bounces in sync with the arm, moves between hands on crossovers, between the legs and behind the back, sits in both hands for shots and passes, and leaves on the release frame
+- [x] IK: feet plant when standing (TwoBoneIK3D), hands reach for incoming passes
+- [x] Collisions: bodies can't overlap; hard contact plays bump reactions
+- [x] Demo game uses all of it; replays drive the legs from the replayed movement
+- [x] Player Lab (PLAY NOW → PLAYER LAB): any player, any animation, turntable, speed
+- [x] Tests: 50 passing (adds animation data/conventions and avatar measurements)
+
+### How to test Phase 2
+1. **Player Lab**: flip through teams, players and animations. Do heights, builds and uniforms look right?
+2. **Quick Game** in Side Court or Drive camera: watch the dribble, shots, dunks, passes, rebounds.
+3. Try dribble moves with swipes in the pro-stick zone (or the right stick).
+4. Watch FPS with the debug overlay. Desktop measurement at Medium is ~300 draw calls, ~320k triangles with 10 players.
+
+### Known limitations
+- Animations are hand-keyed poses, so they're stiffer than motion capture. They're data, so every clip can be refined, and better CC0 mocap can replace any of them later.
+- Faces are generic: no per-player likeness yet. Set skin, hair and face sliders per player in `data/appearance.json`; the Phase 6 builder adds a UI.
+- Replays move players along their recorded paths with matching leg motion; shot and dribble actions aren't re-played inside replays yet.
+- Ball flight is still scripted. Physics is Phase 3.
 
 ## Phase 3: Controls & gameplay feel
 - [ ] Full touch layout editor (drag buttons), contextual defense actions

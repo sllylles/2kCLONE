@@ -12,7 +12,8 @@ const TABS := [
 
 const TILES := {
 	"play_now": [
-		{"id": "quick_game", "title": "QUICK GAME", "sub": "Arena & camera preview", "phase": 0},
+		{"id": "quick_game", "title": "QUICK GAME", "sub": "Real rosters, live demo game", "phase": 0},
+		{"id": "player_lab", "title": "PLAYER LAB", "sub": "Every player & animation up close", "phase": 0},
 		{"id": "season", "title": "SEASON", "sub": "Play a full season", "phase": 5},
 		{"id": "playoffs", "title": "PLAYOFFS", "sub": "Jump into the bracket", "phase": 5},
 		{"id": "all_star", "title": "ALL-STAR", "sub": "3-point & dunk contests", "phase": 5},
@@ -141,8 +142,8 @@ func _build_news() -> Control:
 	var v := VBoxContainer.new()
 	p.add_child(v)
 	v.add_child(UIKit.label("WHAT'S NEW", 22, 800, UIKit.ACCENT_2, true))
-	v.add_child(UIKit.label("All 30 teams, real rosters, broadcast cameras & arenas", 34, 800))
-	v.add_child(UIKit.label("Rosters: %s.  Players are placeholders until Phase 2." % DataDB.roster_source, 22, 500, UIKit.TEXT_DIM))
+	v.add_child(UIKit.label("Phase 2: rigged players with real heights & builds, 40+ animations", 34, 800))
+	v.add_child(UIKit.label("Dribble moves on the swipe zone. Rosters: %s." % DataDB.roster_source, 22, 500, UIKit.TEXT_DIM))
 	var spacer := Control.new()
 	spacer.custom_minimum_size.y = 24
 	var wrap := VBoxContainer.new()
@@ -194,6 +195,8 @@ func _on_tile(id: String) -> void:
 	match id:
 		"quick_game":
 			_show_quick_game()
+		"player_lab":
+			SceneManager.goto("player_lab")
 		"settings":
 			SceneManager.open_overlay("settings")
 		"profiles":

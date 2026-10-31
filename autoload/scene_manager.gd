@@ -9,6 +9,7 @@ const SCENES := {
 	"main_menu": "res://scenes/main_menu.tscn",
 	"save_slots": "res://scenes/save_slots.tscn",
 	"arena": "res://scenes/arena_game.tscn",
+	"player_lab": "res://scenes/player_lab.tscn",
 }
 const OVERLAYS := {
 	"settings": "res://scenes/settings_menu.tscn",
